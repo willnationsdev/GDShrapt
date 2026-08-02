@@ -241,7 +241,58 @@ namespace GDShrapt.Reader
         /// </summary>
         public override int OriginLength => Tokens.Sum(x => x.OriginLength);
 
-        public override int NewLinesCount => Tokens.Sum(x => x.NewLinesCount);
+        internal int _cachedNewLinesCount;
+        internal bool _newLinesCountCached;
+        internal int _cachedStartLine;
+        internal bool _startLineCached;
+
+        /// <summary>
+        /// Number of new lines inside the node. Cached by <see cref="Freeze"/> for O(1) access.
+        /// </summary>
+        public override int NewLinesCount => _newLinesCountCached ? _cachedNewLinesCount : Tokens.Sum(x => x.NewLinesCount);
+
+        /// <summary>
+        /// Starting node's line in the code. Cached by <see cref="Freeze"/> on the whole tree for O(1) access.
+        /// </summary>
+        public override int StartLine => _startLineCached ? _cachedStartLine : base.StartLine;
+
+        internal void FillPositionCaches(int startLine)
+        {
+            _cachedStartLine = startLine;
+            _startLineCached = true;
+
+            var line = startLine;
+
+            foreach (var token in Form.Direct())
+            {
+                if (token is GDNode node)
+                    node.FillPositionCaches(line);
+
+                line += token.NewLinesCount;
+            }
+        }
+
+        internal void ClearPositionCachesFromRoot()
+        {
+            var root = this;
+
+            while (root.Parent != null)
+                root = root.Parent;
+
+            root.ClearPositionCaches();
+        }
+
+        internal void ClearPositionCaches()
+        {
+            _newLinesCountCached = false;
+            _startLineCached = false;
+
+            foreach (var token in Form.Direct())
+            {
+                if (token is GDNode node)
+                    node.ClearPositionCaches();
+            }
+        }
 
         public override int EndColumn
         {

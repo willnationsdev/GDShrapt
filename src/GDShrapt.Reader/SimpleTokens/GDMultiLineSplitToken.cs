@@ -9,7 +9,11 @@ namespace GDShrapt.Reader
         public new string Sequence
         {
             get => base.Sequence;
-            set => base.Sequence = value;
+            set
+            {
+                base.Sequence = value;
+                InvalidatePositionCaches();
+            }
         }
 
         public override GDSyntaxToken Clone()

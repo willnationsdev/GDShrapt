@@ -26,6 +26,7 @@ public class Program
             Console.WriteLine("  --filter *Project*        - Project analysis benchmarks");
             Console.WriteLine("  --filter *TypeInference*  - Type inference benchmarks");
             Console.WriteLine("  --filter *Reference*      - Reference collection benchmarks");
+            Console.WriteLine("  --filter *Position*       - Token position benchmarks");
             Console.WriteLine("  --filter *                - All benchmarks");
             Console.WriteLine();
             Console.WriteLine("Running all benchmarks...");

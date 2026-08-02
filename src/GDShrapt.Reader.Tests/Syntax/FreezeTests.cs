@@ -560,6 +560,136 @@ func test():
 
         #endregion
 
+        #region Position Cache Tests
+
+        private const string PositionSample =
+            "class_name T\nextends Node\n\nvar a = \"x\"\n\nfunc f():\n\tvar b = 1\n\tif b:\n\t\tprint(b)\n\treturn b\n";
+
+        [TestMethod]
+        public void Freeze_Positions_MatchUnfrozenValues()
+        {
+            var unfrozen = _reader.ParseFileContent(PositionSample);
+            var frozen = _reader.ParseFileContent(PositionSample);
+
+            var expected = unfrozen.AllTokens.Select(x => (x.StartLine, x.EndLine, x.NewLinesCount)).ToList();
+
+            frozen.Freeze();
+
+            var actual = frozen.AllTokens.Select(x => (x.StartLine, x.EndLine, x.NewLinesCount)).ToList();
+
+            actual.Should().Equal(expected, "freezing must not change any reported position");
+        }
+
+        [TestMethod]
+        public void Freeze_Nodes_ReportConsistentStartAndEndLine()
+        {
+            var tree = _reader.ParseFileContent(PositionSample);
+            tree.Freeze();
+
+            foreach (var token in tree.AllTokens)
+                token.EndLine.Should().BeGreaterThanOrEqualTo(token.StartLine);
+        }
+
+        [TestMethod]
+        public void Unfrozen_StartLine_ReflectsMutationAfterRead()
+        {
+            var tree = _reader.ParseFileContent("func a():\n\tpass\nfunc b():\n\tpass\n");
+            var b = tree.Methods.Last();
+
+            b.StartLine.Should().Be(2);
+
+            tree.Members.Form.AddBeforeToken(new GDNewLine(), b);
+
+            b.StartLine.Should().Be(3, "an unfrozen tree must always report live positions");
+        }
+
+        [TestMethod]
+        public void Frozen_StringPartSequenceChange_InvalidatesPositionCache()
+        {
+            var tree = _reader.ParseFileContent("var a = \"x\"\nvar b = 1\n");
+            tree.Freeze();
+
+            var b = tree.Variables.Last();
+            b.StartLine.Should().Be(1);
+
+            var newLinesBefore = tree.NewLinesCount;
+
+            var part = tree.AllTokens.OfType<GDStringPart>().First();
+            part.Sequence = "x\ny";
+
+            b.StartLine.Should().Be(2, "changing a string part adds a line before the second variable");
+            tree.NewLinesCount.Should().Be(newLinesBefore + 1);
+        }
+
+        [TestMethod]
+        public void Frozen_LazyInitCarveOut_InvalidatesPositionCache()
+        {
+            var tree = _reader.ParseFileContent("func f():\n\tpass\nvar a = 1\n");
+            tree.Freeze();
+
+            var variable = tree.Variables.First();
+            variable.StartLine.Should().Be(2);
+
+            // Lazy initialization is still allowed on a frozen form (null -> value)
+            var method = tree.Methods.First();
+            var statements = method.Statements;
+            statements.Should().NotBeNull();
+
+            variable.StartLine.Should().Be(2, "reading a lazily initialized token must not corrupt positions");
+        }
+
+        [TestMethod]
+        public void Freeze_Subtree_DoesNotCacheStartLines()
+        {
+            var tree = _reader.ParseFileContent("func a():\n\tpass\nfunc b():\n\tpass\n");
+            var b = tree.Methods.Last();
+
+            b.Freeze();
+
+            b.StartLine.Should().Be(2);
+
+            tree.Members.Form.AddBeforeToken(new GDNewLine(), b);
+
+            b.StartLine.Should().Be(3, "a frozen subtree inside a mutable parent must still track its ancestors");
+        }
+
+        [TestMethod]
+        public void Clone_OfFrozenTree_HasLivePositions()
+        {
+            var tree = _reader.ParseFileContent("func a():\n\tpass\nfunc b():\n\tpass\n");
+            tree.Freeze();
+            tree.Methods.Last().StartLine.Should().Be(2);
+
+            var clone = (GDClassDeclaration)tree.Clone();
+            clone.IsFrozen.Should().BeFalse();
+
+            var cloneB = clone.Methods.Last();
+            cloneB.StartLine.Should().Be(2);
+
+            clone.Members.Form.AddBeforeToken(new GDNewLine(), cloneB);
+
+            cloneB.StartLine.Should().Be(3, "a clone must not inherit the frozen position caches");
+        }
+
+        [TestMethod]
+        public void Freeze_Positions_AreStableAcrossThreads()
+        {
+            var tree = _reader.ParseFileContent(PositionSample);
+            tree.Freeze();
+
+            var tokens = tree.AllTokens.ToList();
+            var expected = tokens.Select(x => x.StartLine).ToList();
+
+            var results = new System.Collections.Concurrent.ConcurrentBag<System.Collections.Generic.List<int>>();
+
+            Parallel.For(0, 8, _ => results.Add(tokens.Select(x => x.StartLine).ToList()));
+
+            foreach (var result in results)
+                result.Should().Equal(expected);
+        }
+
+        #endregion
+
         #region Helper Classes
 
         private class CountingVisitor : GDVisitor

@@ -108,7 +108,7 @@ namespace GDShrapt.Reader
         /// <summary>
         /// Starting token's line in the code which is represented by the tree. Calculating property.
         /// </summary>
-        public int StartLine
+        public virtual int StartLine
         {
             get
             {
@@ -130,15 +130,19 @@ namespace GDShrapt.Reader
         {
             get
             {
-                var parent = _parent;
-
-                if (parent == null)
+                if (_parent == null)
                     return 0;
 
-                var tokensBefore = parent.Form.GetTokensBefore(this);
-
-                return parent.StartLine + tokensBefore.Sum(x => x.NewLinesCount) + NewLinesCount;
+                return StartLine + NewLinesCount;
             }
+        }
+
+        /// <summary>
+        /// Drops the position caches filled by <see cref="GDNode.Freeze"/> for the whole tree this token belongs to.
+        /// </summary>
+        internal void InvalidatePositionCaches()
+        {
+            _parent?.ClearPositionCachesFromRoot();
         }
 
         /// <summary>

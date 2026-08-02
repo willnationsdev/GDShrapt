@@ -1100,6 +1100,18 @@ namespace GDShrapt.Reader
             _owner._cachedFirstLeafToken = _owner.FindFirstLeafToken();
             _owner._cachedLastLeafToken = _owner.FindLastLeafToken();
             _owner._leafTokensCached = true;
+
+            // Children are already cached, so this sums in O(direct tokens)
+            var newLinesCount = 0;
+            for (int i = 0; i < _frozenSnapshot.Length; i++)
+                newLinesCount += _frozenSnapshot[i].NewLinesCount;
+
+            _owner._cachedNewLinesCount = newLinesCount;
+            _owner._newLinesCountCached = true;
+
+            // Start lines depend on ancestors, so they can only be filled from the root
+            if (_owner.Parent == null)
+                _owner.FillPositionCaches(0);
         }
 
         private GDSyntaxToken[] BuildSnapshot()
@@ -1257,6 +1269,9 @@ namespace GDShrapt.Reader
                 value.Parent = _owner;
 
             node.Value = value;
+
+            if (_isFrozen)
+                _owner.ClearPositionCachesFromRoot();
         }
 
         /// <summary>

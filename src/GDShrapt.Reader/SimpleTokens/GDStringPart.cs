@@ -9,7 +9,11 @@ namespace GDShrapt.Reader
         public override string Sequence
         {
             get => _sequence;
-            set => _sequence = value;
+            set
+            {
+                _sequence = value;
+                InvalidatePositionCaches();
+            }
         }
 
         public override int NewLinesCount => _sequence?.Count(c => c == '\n') ?? 0;
