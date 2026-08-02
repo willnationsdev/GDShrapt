@@ -32,7 +32,7 @@
                 return;
             }
 
-            if (c.IsIdentifierStartChar())
+            if (_type == null && _string == null && c.IsIdentifierStartChar())
             {
                 state.PushAndPass(_type = new GDType(), c);
                 return;

@@ -86,5 +86,70 @@ var c: Dictionary[int, Dictionary[string, float]]";
             AssertHelper.CompareCodeStrings(code, declaration.ToString());
             AssertHelper.NoInvalidTokens(declaration);
         }
+
+        [TestMethod]
+        public void ParseType_QualifiedSubtype_InVariableDeclaration()
+        {
+            var reader = new GDScriptReader();
+
+            var code = "func f():\n\tvar x: MyClass.MyEnum = 0";
+
+            var declaration = reader.ParseFileContent(code);
+
+            var localVariable = declaration.AllNodes.OfType<GDVariableDeclarationStatement>().Single();
+            localVariable.Type.Should().BeOfType<GDSubTypeNode>();
+            localVariable.Type.BuildName().Should().Be("MyClass.MyEnum");
+
+            AssertHelper.CompareCodeStrings(code, declaration.ToString());
+            AssertHelper.NoInvalidTokens(declaration);
+        }
+
+        [TestMethod]
+        public void ParseType_QualifiedSubtype_InSignatures()
+        {
+            var reader = new GDScriptReader();
+
+            var code = "func f(a: MyClass.MyEnum) -> MyClass.MyEnum:\n\tpass";
+
+            var declaration = reader.ParseFileContent(code);
+
+            var method = declaration.Methods.First();
+            method.Parameters.First().Type.Should().BeOfType<GDSubTypeNode>();
+            method.ReturnType.Should().BeOfType<GDSubTypeNode>();
+
+            AssertHelper.CompareCodeStrings(code, declaration.ToString());
+            AssertHelper.NoInvalidTokens(declaration);
+        }
+
+        [TestMethod]
+        public void ParseType_QualifiedSubtype_InExtends()
+        {
+            var reader = new GDScriptReader();
+
+            var code = "extends MyClass.Inner\n";
+
+            var declaration = reader.ParseFileContent(code);
+
+            declaration.Extends.Type.Should().BeOfType<GDSubTypeNode>();
+            declaration.Extends.Type.BuildName().Should().Be("MyClass.Inner");
+
+            AssertHelper.CompareCodeStrings(code, declaration.ToString());
+            AssertHelper.NoInvalidTokens(declaration);
+        }
+
+        [TestMethod]
+        public void ParseType_StringExtends_Unaffected()
+        {
+            var reader = new GDScriptReader();
+
+            var code = "extends \"res://a.gd\"\n";
+
+            var declaration = reader.ParseFileContent(code);
+
+            declaration.Extends.Type.Should().BeOfType<GDStringTypeNode>();
+
+            AssertHelper.CompareCodeStrings(code, declaration.ToString());
+            AssertHelper.NoInvalidTokens(declaration);
+        }
     }
 }
