@@ -253,7 +253,9 @@ internal class GDReturnTypeCollector
 
         typeName ??= "Variant";
 
-        var symbol = GDSymbol.Variable(varName, varDecl, typeName: typeName);
+        var symbol = varDecl.IsConstant
+            ? GDSymbol.Constant(varName, varDecl, typeName: typeName)
+            : GDSymbol.Variable(varName, varDecl, typeName: typeName);
         _scopeStack.TryDeclare(symbol);
     }
 

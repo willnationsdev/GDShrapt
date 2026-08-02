@@ -500,7 +500,9 @@ namespace GDShrapt.Semantics.Validator
                 typeName = "Variant";
             }
 
-            Context.Declare(GDSymbol.Variable(varName, varDecl, typeName: typeName, typeNode: typeNode));
+            Context.Declare(varDecl.IsConstant
+                ? GDSymbol.Constant(varName, varDecl, typeName: typeName, typeNode: typeNode)
+                : GDSymbol.Variable(varName, varDecl, typeName: typeName, typeNode: typeNode));
         }
 
         private void ValidateVariableDeclaration(GDVariableDeclarationStatement varDecl)

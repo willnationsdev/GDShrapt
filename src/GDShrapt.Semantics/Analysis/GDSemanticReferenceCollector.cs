@@ -626,7 +626,9 @@ internal class GDSemanticReferenceCollector : GDVisitor
         {
             var typeNode = variableDeclaration.Type;
             var typeName = typeNode?.BuildName();
-            var symbol = GDSymbol.Variable(varName, variableDeclaration, typeName: typeName, typeNode: typeNode);
+            var symbol = variableDeclaration.IsConstant
+                ? GDSymbol.Constant(varName, variableDeclaration, typeName: typeName, typeNode: typeNode)
+                : GDSymbol.Variable(varName, variableDeclaration, typeName: typeName, typeNode: typeNode);
             var enclosingScope = FindEnclosingScopeNode(variableDeclaration);
             _model!.RegisterSymbol(GDSymbolInfo.Local(symbol, _scriptFile, declaringScopeNode: enclosingScope));
             _validationContext?.Scopes.TryDeclare(symbol);

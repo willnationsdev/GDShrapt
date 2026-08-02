@@ -63,6 +63,74 @@ namespace GDShrapt.Reader.Tests.Building
             AssertHelper.NoInvalidTokens(stmt);
         }
 
+        [TestMethod]
+        public void BuildStatement_Variable_ExactOutput()
+        {
+            Assert.AreEqual("var count", GD.Statement.Variable("count").ToString());
+            Assert.AreEqual("var score : int", GD.Statement.Variable("score", "int").ToString());
+            Assert.AreEqual("var x = 1", GD.Statement.Variable("x", GD.Expression.Number(1)).ToString());
+            Assert.AreEqual("var y : = 10", GD.Statement.AutoVariable("y", GD.Expression.Number(10)).ToString());
+            Assert.AreEqual("var health : int = 100", GD.Statement.Variable("health", "int", GD.Expression.Number(100)).ToString());
+        }
+
+        [TestMethod]
+        public void BuildStatement_Variable_ExactOutput_RoundTrips()
+        {
+            var reader = new GDScriptReader();
+
+            foreach (var stmt in new[]
+            {
+                GD.Statement.Variable("count"),
+                GD.Statement.Variable("score", "int"),
+                GD.Statement.Variable("x", GD.Expression.Number(1)),
+                GD.Statement.AutoVariable("y", GD.Expression.Number(10)),
+                GD.Statement.Variable("health", "int", GD.Expression.Number(100))
+            })
+            {
+                var code = stmt.ToString();
+                var parsed = reader.ParseStatement(code);
+
+                Assert.IsInstanceOfType(parsed, typeof(GDVariableDeclarationStatement), code);
+                Assert.AreEqual(code, parsed.ToString());
+                AssertHelper.NoInvalidTokens(parsed);
+            }
+        }
+
+        #endregion
+
+        #region Constant Statements
+
+        [TestMethod]
+        public void BuildStatement_Constant_ExactOutput()
+        {
+            Assert.AreEqual("const A = 1", GD.Statement.Constant("A", GD.Expression.Number(1)).ToString());
+            Assert.AreEqual("const B : = 2", GD.Statement.AutoConstant("B", GD.Expression.Number(2)).ToString());
+            Assert.AreEqual("const C : int = 3", GD.Statement.Constant("C", "int", GD.Expression.Number(3)).ToString());
+        }
+
+        [TestMethod]
+        public void BuildStatement_Constant_RoundTripsAsConstant()
+        {
+            var reader = new GDScriptReader();
+
+            foreach (var stmt in new[]
+            {
+                GD.Statement.Constant("A", GD.Expression.Number(1)),
+                GD.Statement.AutoConstant("B", GD.Expression.Number(2)),
+                GD.Statement.Constant("C", "int", GD.Expression.Number(3))
+            })
+            {
+                var code = stmt.ToString();
+                var parsed = reader.ParseStatement(code) as GDVariableDeclarationStatement;
+
+                Assert.IsNotNull(parsed, code);
+                Assert.IsTrue(parsed.IsConstant, code);
+                Assert.IsNull(parsed.VarKeyword, code);
+                Assert.AreEqual(code, parsed.ToString());
+                AssertHelper.NoInvalidTokens(parsed);
+            }
+        }
+
         #endregion
 
         #region Expression Statements

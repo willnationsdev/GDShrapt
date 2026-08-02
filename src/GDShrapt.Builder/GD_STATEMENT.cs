@@ -131,59 +131,98 @@ namespace GDShrapt.Builder
             public static GDVariableDeclarationStatement Variable(Func<GDVariableDeclarationStatement, GDVariableDeclarationStatement> setup) => setup(new GDVariableDeclarationStatement());
             public static GDVariableDeclarationStatement Variable(params GDSyntaxToken[] unsafeTokens) => new GDVariableDeclarationStatement() { FormTokensSetter = unsafeTokens };
             public static GDVariableDeclarationStatement Variable(string name) => new GDVariableDeclarationStatement()
-            { 
+            {
                 VarKeyword = new GDVarKeyword(),
-                [1] = Syntax.Space(),
+                [2] = Syntax.Space(),
                 Identifier = name
             };
 
             public static GDVariableDeclarationStatement Variable(string name, string type) => new GDVariableDeclarationStatement()
             {
                 VarKeyword = new GDVarKeyword(),
-                [1] = Syntax.Space(),
-                Identifier = name,
                 [2] = Syntax.Space(),
-                Colon = Syntax.Colon,
+                Identifier = name,
                 [3] = Syntax.Space(),
+                Colon = Syntax.Colon,
+                [4] = Syntax.Space(),
                 Type = GD.ParseTypeNode(type)
             };
 
             public static GDVariableDeclarationStatement Variable(string name, GDExpression initializer) => new GDVariableDeclarationStatement()
             {
                 VarKeyword = new GDVarKeyword(),
-                [1] = Syntax.Space(),
+                [2] = Syntax.Space(),
                 Identifier = name,
-                [4] = Syntax.Space(),
-                Assign = Syntax.Assign,
                 [5] = Syntax.Space(),
+                Assign = Syntax.Assign,
+                [6] = Syntax.Space(),
                 Initializer = initializer
             };
 
             public static GDVariableDeclarationStatement AutoVariable(string name, GDExpression initializer) => new GDVariableDeclarationStatement()
             {
                 VarKeyword = new GDVarKeyword(),
-                [1] = Syntax.Space(),
-                Identifier = name,
                 [2] = Syntax.Space(),
+                Identifier = name,
+                [3] = Syntax.Space(),
                 Colon = Syntax.Colon,
-                [4] = Syntax.Space(),
-                Assign = Syntax.Assign,
                 [5] = Syntax.Space(),
+                Assign = Syntax.Assign,
+                [6] = Syntax.Space(),
                 Initializer = initializer
             };
 
             public static GDVariableDeclarationStatement Variable(string name, string type, GDExpression initializer) => new GDVariableDeclarationStatement()
             {
                 VarKeyword = new GDVarKeyword(),
-                [1] = Syntax.Space(),
-                Identifier = name,
                 [2] = Syntax.Space(),
-                Colon = Syntax.Colon,
+                Identifier = name,
                 [3] = Syntax.Space(),
-                Type = GD.ParseTypeNode(type),
+                Colon = Syntax.Colon,
                 [4] = Syntax.Space(),
-                Assign = Syntax.Assign,
+                Type = GD.ParseTypeNode(type),
                 [5] = Syntax.Space(),
+                Assign = Syntax.Assign,
+                [6] = Syntax.Space(),
+                Initializer = initializer
+            };
+
+            public static GDVariableDeclarationStatement Constant(string name, GDExpression initializer) => new GDVariableDeclarationStatement()
+            {
+                ConstKeyword = new GDConstKeyword(),
+                [2] = Syntax.Space(),
+                Identifier = name,
+                [5] = Syntax.Space(),
+                Assign = Syntax.Assign,
+                [6] = Syntax.Space(),
+                Initializer = initializer
+            };
+
+            public static GDVariableDeclarationStatement AutoConstant(string name, GDExpression initializer) => new GDVariableDeclarationStatement()
+            {
+                ConstKeyword = new GDConstKeyword(),
+                [2] = Syntax.Space(),
+                Identifier = name,
+                [3] = Syntax.Space(),
+                Colon = Syntax.Colon,
+                [5] = Syntax.Space(),
+                Assign = Syntax.Assign,
+                [6] = Syntax.Space(),
+                Initializer = initializer
+            };
+
+            public static GDVariableDeclarationStatement Constant(string name, string type, GDExpression initializer) => new GDVariableDeclarationStatement()
+            {
+                ConstKeyword = new GDConstKeyword(),
+                [2] = Syntax.Space(),
+                Identifier = name,
+                [3] = Syntax.Space(),
+                Colon = Syntax.Colon,
+                [4] = Syntax.Space(),
+                Type = GD.ParseTypeNode(type),
+                [5] = Syntax.Space(),
+                Assign = Syntax.Assign,
+                [6] = Syntax.Space(),
                 Initializer = initializer
             };
         }

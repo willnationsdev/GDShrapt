@@ -216,6 +216,39 @@ func test():
             result.Issues.Should().Contain(i => i.RuleId == "GDL004");
         }
 
+        [TestMethod]
+        public void LocalConstantNameCase_ScreamingSnakeCase_NoIssue()
+        {
+            var code = "func f():\n\tconst MAX_SPEED = 10";
+
+            var result = _linter.LintCode(code);
+
+            result.Issues.Where(i => i.RuleId == "GDL003").Should().BeEmpty();
+            result.Issues.Where(i => i.RuleId == "GDL004").Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void LocalConstantNameCase_SnakeCase_ReportsConstantIssueOnly()
+        {
+            var code = "func f():\n\tconst max_speed = 10";
+
+            var result = _linter.LintCode(code);
+
+            result.Issues.Should().Contain(i => i.RuleId == "GDL004");
+            result.Issues.Where(i => i.RuleId == "GDL003").Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void LocalVariableNameCase_StillReportsVariableIssue()
+        {
+            var code = "func f():\n\tvar MaxSpeed = 10";
+
+            var result = _linter.LintCode(code);
+
+            result.Issues.Should().Contain(i => i.RuleId == "GDL003");
+            result.Issues.Where(i => i.RuleId == "GDL004").Should().BeEmpty();
+        }
+
         #endregion
 
         #region SignalNameCaseRule (GDL005)

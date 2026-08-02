@@ -22,7 +22,21 @@ namespace GDShrapt.Linter
             if (variableDeclaration.ConstKeyword == null)
                 return;
 
-            var constName = variableDeclaration.Identifier?.Sequence;
+            CheckConstantName(variableDeclaration.Identifier);
+        }
+
+        public override void Visit(GDVariableDeclarationStatement localVariable)
+        {
+            // Only check constants
+            if (!localVariable.IsConstant)
+                return;
+
+            CheckConstantName(localVariable.Identifier);
+        }
+
+        private void CheckConstantName(GDIdentifier identifier)
+        {
+            var constName = identifier?.Sequence;
             if (string.IsNullOrEmpty(constName))
                 return;
 
@@ -33,12 +47,11 @@ namespace GDShrapt.Linter
             if (!NamingHelper.MatchesCase(constName, expectedCase))
             {
                 var suggestion = NamingHelper.SuggestCorrectName(constName, expectedCase);
-                var identifier = variableDeclaration.Identifier;
                 var fixes = CreateRenameFixes(identifier, suggestion);
 
                 ReportIssue(
                     $"Constant name '{constName}' should use {NamingHelper.GetCaseName(expectedCase)}",
-                    variableDeclaration.Identifier,
+                    identifier,
                     $"Rename to '{suggestion}'",
                     fixes);
             }

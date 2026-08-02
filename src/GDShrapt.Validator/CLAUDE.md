@@ -90,6 +90,8 @@ Tracks variable declarations and usage.
 - Stack-based scope management
 - Inner class base type tracking via dictionary on stack
 - Match case isolation: each case gets separate scope
+- Local declarations are registered as `GDSymbol.Constant` when `GDVariableDeclarationStatement.IsConstant`,
+  so GD5010 (ConstantReassignment) covers method-local `const`, not just class-level `const`
 
 ### GDControlFlowValidator
 

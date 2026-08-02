@@ -323,7 +323,9 @@ public class GDTypeResolver
             if (statement is GDVariableDeclarationStatement varDecl && varDecl.Identifier != null)
             {
                 var typeName = varDecl.Type?.BuildName() ?? InferInitializerType(varDecl.Initializer);
-                var symbol = GDSymbol.Variable(varDecl.Identifier.Sequence, varDecl, typeName: typeName);
+                var symbol = varDecl.IsConstant
+                    ? GDSymbol.Constant(varDecl.Identifier.Sequence, varDecl, typeName: typeName)
+                    : GDSymbol.Variable(varDecl.Identifier.Sequence, varDecl, typeName: typeName);
                 scopeStack.TryDeclare(symbol);
             }
         }

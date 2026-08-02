@@ -28,6 +28,10 @@ namespace GDShrapt.Linter
 
         public override void Visit(GDVariableDeclarationStatement localVariable)
         {
+            // Skip constants - they have their own rule
+            if (localVariable.IsConstant)
+                return;
+
             var varName = localVariable.Identifier?.Sequence;
             CheckVariableName(varName, localVariable.Identifier);
         }

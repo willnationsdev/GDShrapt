@@ -287,7 +287,9 @@ namespace GDShrapt.Reader
             {
                 var typeNode = variableDeclaration.Type;
                 var typeName = typeNode?.BuildName();
-                TryDeclareSymbol(GDSymbol.Variable(varName, variableDeclaration, typeName: typeName, typeNode: typeNode));
+                TryDeclareSymbol(variableDeclaration.IsConstant
+                    ? GDSymbol.Constant(varName, variableDeclaration, typeName: typeName, typeNode: typeNode)
+                    : GDSymbol.Variable(varName, variableDeclaration, typeName: typeName, typeNode: typeNode));
 
                 // Validate type annotation
                 ValidateTypeAnnotation(typeNode, variableDeclaration);

@@ -31,6 +31,42 @@ func test():
         }
 
         [TestMethod]
+        public void LocalConstantReassignment_ReportsError()
+        {
+            var code = @"
+func test():
+    const MAX = 10
+    MAX = 20
+";
+            var result = _validator.ValidateCode(code);
+            result.Errors.Where(d => d.Code == GDDiagnosticCode.ConstantReassignment).Should().NotBeEmpty();
+        }
+
+        [TestMethod]
+        public void LocalVariableReassignment_NoConstantError()
+        {
+            var code = @"
+func test():
+    var value = 10
+    value = 20
+";
+            var result = _validator.ValidateCode(code);
+            result.Errors.Where(d => d.Code == GDDiagnosticCode.ConstantReassignment).Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void LocalConstant_IsVisibleInScope()
+        {
+            var code = @"
+func test():
+    const MAX = 10
+    print(MAX)
+";
+            var result = _validator.ValidateCode(code);
+            result.Errors.Where(d => d.Code == GDDiagnosticCode.UndefinedVariable).Should().BeEmpty();
+        }
+
+        [TestMethod]
         public void UndeclaredVariable_ReportsError()
         {
             var code = @"
