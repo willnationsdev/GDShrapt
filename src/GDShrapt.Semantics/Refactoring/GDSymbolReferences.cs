@@ -43,6 +43,12 @@ public class GDSymbolReference
     public string? SignalName { get; }
     public bool IsSceneSignal { get; }
 
+    /// <summary>
+    /// For union references (Confidence == Union): the union member type names this reference is
+    /// shared across (e.g. ["Enemy", "Player"]). Null/empty for non-union references.
+    /// </summary>
+    public IReadOnlyList<string>? SharedTypes { get; }
+
     public GDSymbolReference(
         GDScriptFile script,
         GDNode? node,
@@ -56,7 +62,8 @@ public class GDSymbolReference
         bool isOverride = false,
         string? callerTypeName = null,
         string? signalName = null,
-        bool isSceneSignal = false)
+        bool isSceneSignal = false,
+        IReadOnlyList<string>? sharedTypes = null)
     {
         Script = script;
         Node = node;
@@ -71,6 +78,7 @@ public class GDSymbolReference
         CallerTypeName = callerTypeName;
         SignalName = signalName;
         IsSceneSignal = isSceneSignal;
+        SharedTypes = sharedTypes;
     }
 
     /// <summary>

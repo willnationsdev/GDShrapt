@@ -31,12 +31,16 @@ public static class RenameCommandBuilder
         var dryRunOption = new Option<bool>(
             new[] { "--dry-run", "-n" },
             "Show what would be changed without making changes");
+        var noUnionStrictOption = new Option<bool>(
+            new[] { "--no-union-strict" },
+            "Keep union/shared references as potential even when every type they are shared across is renamed (do not auto-apply them).");
 
         command.AddArgument(oldNameArg);
         command.AddArgument(newNameArg);
         command.AddOption(projectOption);
         command.AddOption(fileOption);
         command.AddOption(dryRunOption);
+        command.AddOption(noUnionStrictOption);
 
         command.SetHandler(async (InvocationContext context) =>
         {
@@ -45,10 +49,12 @@ public static class RenameCommandBuilder
             var projectPath = context.ParseResult.GetValueForOption(projectOption)!;
             var filePath = context.ParseResult.GetValueForOption(fileOption);
             var dryRun = context.ParseResult.GetValueForOption(dryRunOption);
+            var noUnionStrict = context.ParseResult.GetValueForOption(noUnionStrictOption);
             var format = context.ParseResult.GetValueForOption(globalFormatOption) ?? "text";
 
             var formatter = CommandHelpers.GetFormatter(format);
-            var cmd = new GDRenameCommand(oldName, newName, projectPath, filePath, formatter, dryRun: dryRun);
+            var cmd = new GDRenameCommand(oldName, newName, projectPath, filePath, formatter,
+                dryRun: dryRun, promoteUnionRefs: !noUnionStrict);
             Environment.ExitCode = await cmd.ExecuteAsync();
         });
 

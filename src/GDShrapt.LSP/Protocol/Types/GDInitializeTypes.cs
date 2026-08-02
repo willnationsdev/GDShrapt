@@ -228,10 +228,29 @@ public class GDServerCapabilities
     public bool? FoldingRangeProvider { get; set; }
 
     /// <summary>
+    /// The server provides selection range support.
+    /// </summary>
+    [JsonPropertyName("selectionRangeProvider")]
+    public bool? SelectionRangeProvider { get; set; }
+
+    /// <summary>
+    /// The server provides document link support.
+    /// </summary>
+    [JsonPropertyName("documentLinkProvider")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GDDocumentLinkOptions? DocumentLinkProvider { get; set; }
+
+    /// <summary>
     /// The server provides document formatting support.
     /// </summary>
     [JsonPropertyName("documentFormattingProvider")]
     public bool? DocumentFormattingProvider { get; set; }
+
+    /// <summary>
+    /// The server provides document range formatting support.
+    /// </summary>
+    [JsonPropertyName("documentRangeFormattingProvider")]
+    public bool? DocumentRangeFormattingProvider { get; set; }
 
     /// <summary>
     /// The server provides completion support.
@@ -293,6 +312,13 @@ public class GDServerCapabilities
     /// </summary>
     [JsonPropertyName("workspaceSymbolProvider")]
     public bool? WorkspaceSymbolProvider { get; set; }
+
+    /// <summary>
+    /// Workspace-specific server capabilities (e.g. file operations / willRename).
+    /// </summary>
+    [JsonPropertyName("workspace")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GDWorkspaceServerCapabilities? Workspace { get; set; }
 
     /// <summary>
     /// The server provides execute command support.

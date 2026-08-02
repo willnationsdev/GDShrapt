@@ -655,21 +655,6 @@ public class GDSemanticModel : IGDMemberAccessAnalyzer, IGDArgumentTypeAnalyzer
         => symbol.PositionToken?.StartLine ?? -1;
 
     /// <summary>
-    /// Finds the enclosing method or lambda for an AST node.
-    /// </summary>
-    private GDNode? FindEnclosingMethod(GDNode node)
-    {
-        var current = node;
-        while (current != null)
-        {
-            if (current is GDMethodDeclaration || current is GDMethodExpression)
-                return current;
-            current = current.Parent as GDNode;
-        }
-        return null;
-    }
-
-    /// <summary>
     /// Resolves a member on a type, including inherited members.
     /// </summary>
     internal GDSymbolInfo? ResolveMember(string typeName, string memberName)
@@ -711,6 +696,31 @@ public class GDSemanticModel : IGDMemberAccessAnalyzer, IGDArgumentTypeAnalyzer
 
         return GetReferencesTo(symbol);
     }
+
+    /// <summary>
+    /// Gets the assignment expressions (plain and compound) whose left-hand side is the named symbol.
+    /// </summary>
+    public IEnumerable<GDDualOperatorExpression> GetAssignmentExpressionsTo(string symbolName)
+    {
+        if (_scriptFile.Class == null || string.IsNullOrEmpty(symbolName))
+            yield break;
+
+        foreach (var expr in _scriptFile.Class.AllNodes.OfType<GDDualOperatorExpression>())
+        {
+            if (!IsAssignmentOperatorType(expr.OperatorType))
+                continue;
+
+            if (expr.LeftExpression is GDIdentifierExpression id && id.Identifier?.Sequence == symbolName)
+                yield return expr;
+        }
+    }
+
+    private static bool IsAssignmentOperatorType(GDDualOperatorType type) =>
+        type == GDDualOperatorType.Assignment
+        || type == GDDualOperatorType.AddAndAssign
+        || type == GDDualOperatorType.SubtractAndAssign
+        || type == GDDualOperatorType.MultiplyAndAssign
+        || type == GDDualOperatorType.DivideAndAssign;
 
     /// <summary>
     /// Gets all accesses to a specific member on a type (e.g., OS.execute, Node.add_child).
@@ -891,7 +901,71 @@ public class GDSemanticModel : IGDMemberAccessAnalyzer, IGDArgumentTypeAnalyzer
     /// No fallbacks — returns null if flow analysis has no data for this location.
     /// </summary>
     public GDFlowVariableType? GetVariableTypeAt(string variableName, GDNode atLocation)
-        => _flowQueryService.GetFlowVariableType(variableName, atLocation);
+    {
+        var flowVar = _flowQueryService.GetFlowVariableType(variableName, atLocation);
+
+        // Flow-level call-site parameter union: an untyped parameter whose flow type carries no concrete
+        // type yet surfaces the union of the types passed at its call sites — making the data-flow union a
+        // first-class fact for every consumer. Read lazily here because call-site enrichment runs after the
+        // per-method flow analyzer is cached.
+        if (HasNoConcreteFlowType(flowVar))
+        {
+            var callSiteUnion = TryGetParameterCallSiteUnion(variableName, atLocation);
+            if (callSiteUnion != null)
+                return callSiteUnion;
+        }
+
+        return flowVar;
+    }
+
+    private static bool HasNoConcreteFlowType(GDFlowVariableType? flowVar)
+    {
+        if (flowVar == null)
+            return true;
+        if (flowVar.DeclaredType != null && !flowVar.DeclaredType.IsVariant)
+            return false;
+        if (flowVar.IsNarrowed)
+            return false;
+        var current = flowVar.CurrentType;
+        return current == null || current.IsEmpty || (current.IsSingleType && current.Types.First().IsVariant);
+    }
+
+    private GDFlowVariableType? TryGetParameterCallSiteUnion(string variableName, GDNode atLocation)
+    {
+        var method = GDProvenanceTracer.FindEnclosingMethod(atLocation);
+        if (method?.Parameters == null)
+            return null;
+
+        var param = method.Parameters.FirstOrDefault(p => p.Identifier?.Sequence == variableName);
+        if (param == null || param.Type != null)
+            return null;
+
+        var methodName = method.Identifier?.Sequence;
+        if (string.IsNullOrEmpty(methodName))
+            return null;
+
+        var callSiteUnion = GetCallSiteTypes(methodName!, variableName);
+        if (callSiteUnion == null)
+            return null;
+
+        var members = callSiteUnion.Types
+            .Where(t => t != null && !t.IsVariant)
+            .Distinct()
+            .ToList();
+        if (members.Count < 2)
+            return null;
+
+        var location = new GDFlowLocation(_scriptFile?.FullPath, param.StartLine, param.StartColumn);
+        var result = new GDFlowVariableType();
+        foreach (var member in members)
+        {
+            var origin = new GDTypeOrigin(
+                GDTypeOriginKind.ParameterCallSite, GDTypeOriginConfidence.Inferred, location,
+                description: $"call-site argument for parameter '{variableName}'");
+            result.CurrentType.AddType(member, origin);
+        }
+        return result;
+    }
 
     /// <summary>
     /// Gets the full flow variable type info at a specific location.

@@ -40,6 +40,16 @@ Flow analysis is the **single source of truth** for variable types within method
 3. **Call-site parameter injection** — for untyped parameters, union of types passed by callers
 4. **Declared type / union type** — additional fallbacks
 
+**Pervasive data-flow unions.** When multiple origins reach a variable, the flow carries the raw union
+of concrete types in `CurrentType.Types` (with per-member `GDTypeOrigin`); consumers read that raw union,
+not the collapsed `EffectiveType`. `GetVariableTypeAt` surfaces the call-site parameter union (priority 3)
+lazily — flow analyzers are cached eagerly (`GDFlowAnalysisRegistry.GetOrCreateFlowAnalyzer`) before
+call-site enrichment runs, so an untyped parameter whose flow type has no concrete type reads
+`GDUnionTypeService.GetCallSiteTypes` at query time and returns a union tagged `ParameterCallSite`. The
+union is then consumed union-first by the cross-file finder and by `GetMemberAccessConfidence`
+(member-count → Strict/Potential/NameMatch, never the `Union` enum). Narrowing guard
+(`IsNarrowed || CurrentType.IsSingleType`) always precedes the union check.
+
 ## Subfolders
 
 | Folder | Contents |
@@ -608,6 +618,10 @@ IReadOnlyList<string> FindTypesWithProperty(string propertyName);
 2. **Lambda body analysis**: Captured variables use definition-time types
 3. **Generic types**: Limited support for complex generic inference
 4. **Cycle handling**: Methods in cycles get `Variant` fallback
+5. **`callv` arguments** (`GDCallSiteCollector`): `callv` passes its arguments as a single Array, which is not statically unpacked — those call sites are skipped for parameter inference.
+6. **Negated type guards** (`GDParameterUsageAnalyzer`): only direct `if x is Type` guards are detected; the negated `if not x is Type` pattern is not.
+7. **Ambiguous callable definitions** (`GDCallableCallSiteCollector`): when a callable name resolves to multiple definitions, the first is used (no flow-based disambiguation).
+8. **Callable member-calls** (`GDCallableFlowCollector`): `object.method` callable references resolve the method name assuming the same class (the caller's class is not extracted).
 
 ## Cycle Protection Summary
 

@@ -13,6 +13,13 @@ namespace GDShrapt.Linter
         private readonly HashSet<string> _enabledRules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, GDLintSeverity> _severityOverrides = new Dictionary<string, GDLintSeverity>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Input action names configured in the project's project.godot ([input] section),
+        /// used by GDL246 to validate Input action arguments. Null means no project context is
+        /// available, in which case unknown action names are accepted (to avoid false positives).
+        /// </summary>
+        public IReadOnlyCollection<string> ProjectInputActions { get; set; }
+
         // Formatting options
         /// <summary>
         /// Expected indentation style. Default: Tabs.

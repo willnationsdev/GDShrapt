@@ -72,7 +72,15 @@ internal class GDReplExpressionEvaluator
             // If expression (ternary)
             GDIfExpression ifExpr => EvaluateIfExpression(ifExpr, context),
 
-            _ => throw new NotSupportedException($"Expression type '{expression.GetType().Name}' is not supported in REPL")
+            // Node access ($Path / %UniqueName) and name/path literals
+            GDGetNodeExpression getNodeExpr => EvaluateGetNode(getNodeExpr, context),
+            GDGetUniqueNodeExpression uniqueExpr => EvaluateGetUniqueNode(uniqueExpr, context),
+            GDStringNameExpression strNameExpr => new StringName(strNameExpr.Sequence ?? string.Empty),
+            GDNodePathExpression nodePathExpr => new NodePath(StripQuotes(nodePathExpr.Path?.ToString() ?? string.Empty)),
+
+            _ => throw new NotSupportedException(
+                $"The REPL cannot evaluate '{expression.GetType().Name}' expressions " +
+                "(constructs like await, preload and assignments are not supported).")
         };
     }
 
@@ -161,6 +169,33 @@ internal class GDReplExpressionEvaluator
 
         // Handle struct types (Vector2, Vector3, Color, etc.)
         return GetMember(callerResult, memberName);
+    }
+
+    private Variant EvaluateGetNode(GDGetNodeExpression expr, GodotObject context)
+    {
+        if (context is not Node node)
+            throw new Exception("$NodePath can only be evaluated when the REPL context is a Node.");
+
+        var path = StripQuotes(expr.Path?.ToString() ?? string.Empty);
+        var target = node.GetNodeOrNull(path);
+        return target != null ? Variant.From(target) : default;
+    }
+
+    private Variant EvaluateGetUniqueNode(GDGetUniqueNodeExpression expr, GodotObject context)
+    {
+        if (context is not Node node)
+            throw new Exception("%UniqueNode can only be evaluated when the REPL context is a Node.");
+
+        var name = StripQuotes(expr.Name?.ToString() ?? string.Empty);
+        var target = node.GetNodeOrNull("%" + name);
+        return target != null ? Variant.From(target) : default;
+    }
+
+    private static string StripQuotes(string value)
+    {
+        if (value.Length >= 2 && (value[0] == '"' || value[0] == '\'') && value[value.Length - 1] == value[0])
+            return value.Substring(1, value.Length - 2);
+        return value;
     }
 
     private Variant GetMember(Variant obj, string memberName)
@@ -559,7 +594,7 @@ internal class GDReplExpressionEvaluator
             GDDualOperatorType.Is => EvaluateIs(left, right),
             GDDualOperatorType.In => dualExpr.NotKeyword != null ? !EvaluateIn(left, right) : EvaluateIn(left, right),
 
-            _ => throw new NotSupportedException($"Operator '{dualExpr.OperatorType}' is not supported")
+            _ => throw new NotSupportedException($"The REPL does not support the '{dualExpr.OperatorType}' operator.")
         };
     }
 
@@ -675,7 +710,7 @@ internal class GDReplExpressionEvaluator
             GDSingleOperatorType.Negate => Negate(target),
             GDSingleOperatorType.Not or GDSingleOperatorType.Not2 => !target.AsBool(),
             GDSingleOperatorType.BitwiseNegate => ~target.AsInt64(),
-            _ => throw new NotSupportedException($"Unary operator '{singleExpr.OperatorType}' is not supported")
+            _ => throw new NotSupportedException($"The REPL does not support the unary '{singleExpr.OperatorType}' operator.")
         };
     }
 

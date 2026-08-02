@@ -342,11 +342,6 @@ public class GDGodotTypesProvider : IGDRuntimeProvider
         return null;
     }
 
-    private GDRuntimeMemberInfo? GetMemberFromBaseType(string typeName, string memberName)
-    {
-        return GetMemberFromBaseTypeInternal(typeName, memberName, new HashSet<string>());
-    }
-
     private GDRuntimeMemberInfo? GetMemberFromBaseTypeInternal(string typeName, string memberName, HashSet<string> visited)
     {
         var typeInfo = GetTypeInfo(typeName);

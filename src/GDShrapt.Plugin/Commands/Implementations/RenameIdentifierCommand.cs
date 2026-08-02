@@ -14,12 +14,10 @@ internal class RenameIdentifierCommand : Command
     Action<string, int, int, int> _renamingDialogNavigateHandler;
     NodeRenamingDialog _nodeRenamingDialog;
     GDNodePathReferenceFinder _referenceFinder;
-    readonly IGDSymbolsHandler _symbolsHandler;
 
     public RenameIdentifierCommand(GDShraptPlugin plugin)
         : base(plugin)
     {
-        _symbolsHandler = plugin.ServiceRegistry.GetService<IGDSymbolsHandler>();
     }
 
     public override async Task Execute(IScriptEditor controller)
@@ -73,115 +71,98 @@ internal class RenameIdentifierCommand : Command
 
         var parent = identifier.Parent;
 
-        if (parent is GDMethodDeclaration method)
-        {
-            if (await RenameMethod(method, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDIdentifierExpression expression)
-        {
-            if (await RenameVariable(expression, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDVariableDeclaration variable)
-        {
-            if (await RenameVariable(variable, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDMatchCaseVariableExpression matchCase)
-        {
-            if (await RenameMatchCaseVariable(matchCase, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDForStatement forStatement)
-        {
-            if (await RenameForVariable(forStatement, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDSignalDeclaration signal)
-        {
-            if (await RenameSignal(signal, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDVariableDeclarationStatement variableStatement)
-        {
-            if (await RenameVariable(variableStatement, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDEnumDeclaration enumDelcaration)
-        {
-            if (await RenameEnum(enumDelcaration, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDMemberOperatorExpression typeMember)
-        {
-            if (await RenameMember(typeMember, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDParameterDeclaration parameter)
-        {
-            if (await RenameParameter(parameter, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
-        if (parent is GDInnerClassDeclaration innerClass)
-        {
-            if (await RenameInnerClass(innerClass, identifier))
-            {
-                controller.Text = @class.ToString();
-                return;
-            }
-        }
-
+        // Node-path identifier in a path list → scene-aware node rename (kept on GDRenameService).
         if (parent is GDPathList pathList)
         {
             if (await RenamePathListNode(controller, pathList, identifier))
-            {
                 controller.Text = @class.ToString();
-                return;
-            }
+            return;
         }
 
-        Logger.Info("Invalid parent");
+        // Every other symbol (method/var/signal/enum/member/parameter/inner class/...) goes through
+        // the shared core rename handler — cross-file, strict-only, identical to CLI/LSP.
+        await RenameSymbol(controller, identifier.Sequence);
+    }
+
+    private async Task RenameSymbol(IScriptEditor controller, string oldName)
+    {
+        var renameParams = await AskParametersAndPrepareIdentifier(oldName, null);
+        if (renameParams == null)
+            return;
+
+        var newName = renameParams.NewName;
+        var filePath = controller.ScriptFile?.FullPath ?? controller.ScriptPath;
+        if (string.IsNullOrEmpty(filePath))
+            return;
+
+        var rename = Plugin.ServiceRegistry.GetService<IGDRenameHandler>();
+        if (rename == null)
+        {
+            Logger.Info("Rename cancelled: handler not available");
+            return;
+        }
+
+        var result = rename.Plan(oldName, newName, filePath);
+        if (!result.Success || result.StrictEdits.Count == 0)
+        {
+            Logger.Info($"Rename: no type-verified references for '{oldName}'");
+            return;
+        }
+
+        ApplyRenameEdits(controller, filePath, result, rename);
+    }
+
+    private void ApplyRenameEdits(IScriptEditor controller, string currentFilePath, GDRenameResult result, IGDRenameHandler rename)
+    {
+        var currentEdits = result.StrictEdits.Where(e => PathEquals(e.FilePath, currentFilePath)).ToList();
+        var otherEdits = result.StrictEdits.Where(e => !PathEquals(e.FilePath, currentFilePath)).ToList();
+
+        // Current file: apply to the open editor buffer (atomic undo, keeps the tab live).
+        if (currentEdits.Count > 0)
+        {
+            controller.Text = ApplyEditsToText(controller.Text, currentEdits);
+            controller.ReloadScriptFromText();
+        }
+
+        // Other files: written on disk; the project file-watcher reloads + re-analyzes them.
+        if (otherEdits.Count > 0)
+            rename.ApplyEdits(otherEdits);
+
+        Logger.Info($"Renamed {result.StrictEdits.Count} reference(s) across {result.FileCount} file(s)");
+        if (result.PotentialEdits.Count > 0)
+            Logger.Info($"{result.PotentialEdits.Count} duck-typed reference(s) found but not applied (lower confidence)");
+    }
+
+    private static string ApplyEditsToText(string text, List<GDTextEdit> edits)
+    {
+        var lines = text.Split('\n');
+        foreach (var e in edits.OrderByDescending(x => x.Line).ThenByDescending(x => x.Column))
+        {
+            var line0 = GDPluginPositionAdapter.FromLine(e.Line);
+            var col0 = GDPluginPositionAdapter.FromEditColumn(e.Column);
+            if (line0 < 0 || line0 >= lines.Length)
+                continue;
+
+            var l = lines[line0];
+            var oldLen = e.OldText?.Length ?? 0;
+            if (col0 < 0 || col0 + oldLen > l.Length)
+                continue;
+            if (!string.IsNullOrEmpty(e.OldText) && l.Substring(col0, oldLen) != e.OldText)
+                continue;
+
+            lines[line0] = l.Substring(0, col0) + e.NewText + l.Substring(col0 + oldLen);
+        }
+        return string.Join("\n", lines);
+    }
+
+    private static bool PathEquals(string? a, string? b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+            return false;
+        return string.Equals(
+            System.IO.Path.GetFullPath(a).Replace('\\', '/'),
+            System.IO.Path.GetFullPath(b).Replace('\\', '/'),
+            System.StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<bool> RenamePathListNode(IScriptEditor scriptEditor, GDPathList pathList, GDIdentifier identifier)
@@ -463,825 +444,6 @@ internal class RenameIdentifierCommand : Command
         }
 
         return null;
-    }
-
-    private async Task<bool> RenameInnerClass(GDInnerClassDeclaration innerClass, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming Inner Class");
-
-        var innerClassName = identifier.Sequence;
-        var parentClass = innerClass.ClassDeclaration as GDClassDeclaration;
-        if (parentClass == null)
-            return false;
-
-        var ScriptFile = Map.GetScriptByClass(parentClass);
-
-        // Collect all references to this inner class
-        var references = new LinkedList<GDMemberReference>();
-
-        // Add the inner class declaration itself
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Member = innerClass,
-            Script = ScriptFile
-        });
-
-        // Find type references to this inner class within the parent class
-        foreach (var token in parentClass.AllTokens.OfType<GDIdentifier>())
-        {
-            // Check if parent is a type context
-            if (token.Parent is GDSingleTypeNode && token.Sequence == innerClassName && token != identifier)
-            {
-                references.AddLast(new GDMemberReference
-                {
-                    Identifier = token,
-                    Script = ScriptFile
-                });
-            }
-        }
-
-        // Find constructor calls (InnerClass.new())
-        foreach (var call in parentClass.AllNodes.OfType<GDCallExpression>())
-        {
-            if (call.CallerExpression is GDMemberOperatorExpression memberOp &&
-                memberOp.Identifier?.Sequence == "new" &&
-                memberOp.CallerExpression is GDIdentifierExpression idExpr &&
-                idExpr.Identifier?.Sequence == innerClassName)
-            {
-                references.AddLast(new GDMemberReference
-                {
-                    Identifier = idExpr.Identifier,
-                    Script = ScriptFile
-                });
-            }
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(innerClassName, references)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Rename type references to this inner class within the parent class
-        foreach (var token in parentClass.AllTokens.OfType<GDIdentifier>())
-        {
-            // Check if parent is a type context
-            if (token.Parent is GDSingleTypeNode && token.Sequence == innerClassName)
-                token.Sequence = newName;
-        }
-
-        // Rename constructor calls (new InnerClass())
-        foreach (var call in parentClass.AllNodes.OfType<GDCallExpression>())
-        {
-            if (call.CallerExpression is GDMemberOperatorExpression memberOp &&
-                memberOp.Identifier?.Sequence == "new" &&
-                memberOp.CallerExpression is GDIdentifierExpression idExpr &&
-                idExpr.Identifier?.Sequence == innerClassName)
-            {
-                idExpr.Identifier.Sequence = newName;
-            }
-        }
-
-        // Rename the declaration itself
-        identifier.Sequence = newName;
-
-        return true;
-    }
-
-    private async Task<bool> RenameParameter(GDParameterDeclaration parameter, GDIdentifier identifier)
-    {
-        var member = parameter.ClassMember;
-
-        if (member is GDMethodDeclaration method)
-            return await RenameMethodParameter(method, parameter, identifier);
-
-        if (member is GDSignalDeclaration signal)
-            return await RenameSignalParameter(signal, parameter, identifier);
-
-        Logger.Info("Invalid parent");
-        return false;
-    }
-
-    private async Task<bool> RenameSignalParameter(GDSignalDeclaration signal, GDParameterDeclaration parameter, GDIdentifier identifier)
-    {
-        var classDecl = signal.ClassDeclaration as GDClassDeclaration;
-        var ScriptFile = classDecl != null ? Map.GetScriptByClass(classDecl) : null;
-
-        // Collect references - signal parameters typically only have the declaration
-        var references = new LinkedList<GDMemberReference>();
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Script = ScriptFile
-        });
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(identifier.Sequence, references)) == null)
-            return false;
-
-        identifier.Sequence = parameters.NewName;
-        return true;
-    }
-
-    private async Task<bool> RenameMethodParameter(GDMethodDeclaration method, GDParameterDeclaration parameter, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming Method Parameter");
-
-        var parameterName = identifier.Sequence;
-
-        // Collect all references to this parameter within the method
-        var references = new LinkedList<GDMemberReference>();
-        var classDecl = method.ClassDeclaration as GDClassDeclaration;
-        var ScriptFile = classDecl != null ? Map.GetScriptByClass(classDecl) : null;
-
-        // Add the parameter declaration itself as a reference
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Script = ScriptFile
-        });
-
-        // Find all usages within the method body
-        if (method.Statements != null)
-        {
-            foreach (var usage in method.Statements.AllNodes.OfType<GDIdentifierExpression>())
-            {
-                if (usage.Identifier?.Sequence == parameterName)
-                {
-                    references.AddLast(new GDMemberReference
-                    {
-                        Identifier = usage.Identifier,
-                        Script = ScriptFile
-                    });
-                }
-            }
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(parameterName, references)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Rename all usages within the method body
-        if (method.Statements != null)
-        {
-            foreach (var usage in method.Statements.AllNodes.OfType<GDIdentifierExpression>())
-            {
-                if (usage.Identifier?.Sequence == parameterName)
-                    usage.Identifier.Sequence = newName;
-            }
-        }
-
-        // Rename the parameter declaration itself
-        identifier.Sequence = newName;
-
-        return true;
-    }
-
-    private async Task<bool> RenameMember(GDMemberOperatorExpression typeMember, GDIdentifier identifier)
-    {
-        var type = GetExpressionType(typeMember.CallerExpression);
-
-        if (type == null)
-        {
-            Logger.Info($"Unable to get type from the code");
-            return false;
-        }
-
-        var map = Map.GetScriptByTypeName(type);
-
-        if (map == null)
-        {
-            Logger.Info($"There is no script reference for the type '{type}'");
-            return false;
-        }
-
-        var memberName = identifier.Sequence;
-        var member = map.Class.Members.OfType<GDIdentifiableClassMember>().FirstOrDefault(x => x.Identifier?.Sequence == memberName);
-
-        if (member == null)
-        {
-            Logger.Info($"There is no member with name '{memberName}' in type '{type}'");
-            return false;
-        }
-
-        var allReferences = new LinkedList<GDMemberReference>();
-
-        // TODO: Use IGDFindRefsHandler to find cross-file references
-        /*foreach (var binding in Map.Scripts.OrderBy(x => x.TypeName))
-        {
-            var references = binding.GetReferencesToTypeMember(type, memberName);
-
-            if (references == null)
-                continue;
-
-            foreach (var reference in references)
-                allReferences.AddLast(reference);
-        }*/
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(memberName, allReferences)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Apply rename to all references across all scripts
-        foreach (var reference in allReferences)
-        {
-            if (reference.Identifier != null)
-            {
-                reference.Identifier.Sequence = newName;
-            }
-        }
-
-        // Rename the declaration in the target type
-        if (member.Identifier != null)
-        {
-            member.Identifier.Sequence = newName;
-        }
-
-        // Save changes to all affected scripts
-        var affectedScripts = allReferences
-            .Select(r => r.Script)
-            .Where(s => s != null)
-            .Distinct()
-            .ToList();
-
-        // Add the declaring script if not already included
-        if (!affectedScripts.Contains(map))
-        {
-            affectedScripts.Add(map);
-        }
-
-        // Note: Changes are applied to the AST in memory
-        // The caller (Execute method) will update the editor text via controller.Text = @class.ToString()
-
-        Logger.Info($"Renamed member '{memberName}' to '{newName}' in {allReferences.Count} references");
-        return true;
-    }
-
-    private string GetExpressionType(GDExpression callerExpression)
-    {
-        // Get the script map from the class declaration
-        var classDecl = callerExpression?.ClassDeclaration as GDClassDeclaration;
-        if (classDecl == null)
-            return null;
-
-        var ScriptFile = Map.GetScriptByClass(classDecl);
-        if (ScriptFile?.FullPath == null)
-            return null;
-
-        return _symbolsHandler.GetTypeForNode(callerExpression, ScriptFile.FullPath);
-    }
-
-    private async Task<bool> RenameEnum(GDEnumDeclaration enumDeclaration, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming Enum");
-
-        var enumName = identifier.Sequence;
-        var classDecl = enumDeclaration.ClassDeclaration as GDClassDeclaration;
-        if (classDecl == null)
-            return false;
-
-        var ScriptFile = Map.GetScriptByClass(classDecl);
-
-        // Collect all references to this enum
-        var references = new LinkedList<GDMemberReference>();
-
-        // Add the enum declaration itself
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Member = enumDeclaration,
-            Script = ScriptFile
-        });
-
-        // Find all usages within the class (State.IDLE, etc.)
-        foreach (var usage in classDecl.AllNodes.OfType<GDIdentifierExpression>())
-        {
-            if (usage.Identifier?.Sequence == enumName)
-            {
-                references.AddLast(new GDMemberReference
-                {
-                    Identifier = usage.Identifier,
-                    Script = ScriptFile
-                });
-            }
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(enumName, references)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Rename all usages within the class
-        foreach (var usage in classDecl.AllNodes.OfType<GDIdentifierExpression>())
-        {
-            if (usage.Identifier?.Sequence == enumName)
-                usage.Identifier.Sequence = newName;
-        }
-
-        // Rename the declaration itself
-        identifier.Sequence = newName;
-
-        return true;
-    }
-
-    private async Task<bool> RenameForVariable(GDForStatement forStatement, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming For Variable");
-
-        var variableName = identifier.Sequence;
-
-        // Collect all references to this for loop variable
-        var references = new LinkedList<GDMemberReference>();
-        var classDecl = forStatement.ClassDeclaration as GDClassDeclaration;
-        var ScriptFile = classDecl != null ? Map.GetScriptByClass(classDecl) : null;
-
-        // Add the variable declaration itself as a reference
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Script = ScriptFile
-        });
-
-        // Find all usages within the for loop body
-        if (forStatement.Statements != null)
-        {
-            foreach (var usage in forStatement.Statements.AllNodes.OfType<GDIdentifierExpression>())
-            {
-                if (usage.Identifier?.Sequence == variableName)
-                {
-                    references.AddLast(new GDMemberReference
-                    {
-                        Identifier = usage.Identifier,
-                        Script = ScriptFile
-                    });
-                }
-            }
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(variableName, references)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Rename usages only within the for loop body
-        if (forStatement.Statements != null)
-        {
-            foreach (var usage in forStatement.Statements.AllNodes.OfType<GDIdentifierExpression>())
-            {
-                if (usage.Identifier?.Sequence == variableName)
-                    usage.Identifier.Sequence = newName;
-            }
-        }
-
-        identifier.Sequence = newName;
-        return true;
-    }
-
-    private async Task<bool> RenameMatchCaseVariable(GDMatchCaseVariableExpression matchCase, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming Match Case Variable");
-
-        var variableName = identifier.Sequence;
-        var classDecl = matchCase.ClassDeclaration as GDClassDeclaration;
-        var ScriptFile = classDecl != null ? Map.GetScriptByClass(classDecl) : null;
-
-        // Collect all references to this match case variable
-        var references = new LinkedList<GDMemberReference>();
-
-        // Add the variable declaration itself
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Script = ScriptFile
-        });
-
-        // Find the match statement and collect usages within its branches
-        var matchStatement = matchCase.Parent?.Parent as GDMatchStatement;
-        if (matchStatement?.Cases != null)
-        {
-            foreach (var matchCaseItem in matchStatement.Cases)
-            {
-                if (matchCaseItem.Statements != null)
-                {
-                    foreach (var usage in matchCaseItem.Statements.AllNodes.OfType<GDIdentifierExpression>())
-                    {
-                        if (usage.Identifier?.Sequence == variableName)
-                        {
-                            references.AddLast(new GDMemberReference
-                            {
-                                Identifier = usage.Identifier,
-                                Script = ScriptFile
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(variableName, references)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Rename within its branches
-        if (matchStatement?.Cases != null)
-        {
-            foreach (var matchCaseItem in matchStatement.Cases)
-            {
-                if (matchCaseItem.Statements != null)
-                {
-                    foreach (var usage in matchCaseItem.Statements.AllNodes.OfType<GDIdentifierExpression>())
-                    {
-                        if (usage.Identifier?.Sequence == variableName)
-                            usage.Identifier.Sequence = newName;
-                    }
-                }
-            }
-        }
-
-        identifier.Sequence = newName;
-        return true;
-    }
-
-    private async Task<bool> RenameMethod(GDMethodDeclaration method, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming Method");
-
-        var methodName = identifier.Sequence;
-        var classDecl = method.ClassDeclaration as GDClassDeclaration;
-        if (classDecl == null)
-            return false;
-
-        var ScriptFile = Map.GetScriptByClass(classDecl);
-
-        // Collect all references to this method
-        var references = new LinkedList<GDMemberReference>();
-
-        // Add the method declaration itself
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Member = method,
-            Script = ScriptFile
-        });
-
-        // Find all call expressions to this method within the class
-        foreach (var call in classDecl.AllNodes.OfType<GDCallExpression>())
-        {
-            if (call.CallerExpression is GDIdentifierExpression idExpr &&
-                idExpr.Identifier?.Sequence == methodName)
-            {
-                references.AddLast(new GDMemberReference
-                {
-                    Identifier = idExpr.Identifier,
-                    Script = ScriptFile
-                });
-            }
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(methodName, references)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Rename all call expressions to this method within the class
-        foreach (var call in classDecl.AllNodes.OfType<GDCallExpression>())
-        {
-            if (call.CallerExpression is GDIdentifierExpression idExpr &&
-                idExpr.Identifier?.Sequence == methodName)
-            {
-                idExpr.Identifier.Sequence = newName;
-            }
-        }
-
-        // Rename the declaration itself
-        identifier.Sequence = newName;
-
-        return true;
-    }
-
-    private async Task<bool> RenameVariable(GDIdentifierExpression expression, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming Variable from Expression");
-
-        var variableName = identifier.Sequence;
-
-        // First find the declaration of this variable
-        var classDecl = expression.ClassDeclaration as GDClassDeclaration;
-        if (classDecl == null)
-            return false;
-
-        var ScriptFile = Map.GetScriptByClass(classDecl);
-        if (ScriptFile?.FullPath == null)
-        {
-            Logger.Info("ScriptFile not available");
-            return false;
-        }
-
-        // Find the symbol for this identifier using handler
-        var symbol = _symbolsHandler.FindSymbolByName(variableName, ScriptFile.FullPath);
-        if (symbol == null)
-        {
-            Logger.Info($"Symbol '{variableName}' not found");
-            return false;
-        }
-
-        // Collect references using handler
-        var memberReferences = new LinkedList<GDMemberReference>();
-        var semanticRefs = _symbolsHandler.GetReferencesToSymbol(symbol, ScriptFile.FullPath);
-        foreach (var reference in semanticRefs)
-        {
-            var refNode = reference.ReferenceNode;
-            if (refNode is GDIdentifierExpression refExpr && refExpr.Identifier != null)
-            {
-                memberReferences.AddLast(new GDMemberReference
-                {
-                    Identifier = refExpr.Identifier,
-                    Script = ScriptFile
-                });
-            }
-            else if (refNode is GDNode node)
-            {
-                // Try to find identifier in the node's tokens
-                foreach (var token in node.AllTokens)
-                {
-                    if (token is GDIdentifier id && id.Sequence == variableName)
-                    {
-                        memberReferences.AddLast(new GDMemberReference
-                        {
-                            Identifier = id,
-                            Script = ScriptFile
-                        });
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Add the declaration if it exists
-        if (symbol.DeclarationNode is GDVariableDeclaration varDecl && varDecl.Identifier != null)
-        {
-            memberReferences.AddFirst(new GDMemberReference
-            {
-                Identifier = varDecl.Identifier,
-                Member = varDecl,
-                Script = ScriptFile
-            });
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(variableName, memberReferences)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Rename all references
-        foreach (var reference in semanticRefs)
-        {
-            var refNode = reference.ReferenceNode;
-            if (refNode is GDIdentifierExpression refExpr && refExpr.Identifier != null)
-                refExpr.Identifier.Sequence = newName;
-            else if (refNode is GDNode node)
-            {
-                // Try to find identifier in the node's tokens
-                foreach (var token in node.AllTokens)
-                {
-                    if (token is GDIdentifier id && id.Sequence == variableName)
-                    {
-                        id.Sequence = newName;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Rename the declaration if it exists
-        if (symbol.DeclarationNode is GDVariableDeclaration varDecl2 && varDecl2.Identifier != null)
-            varDecl2.Identifier.Sequence = newName;
-
-        return true;
-    }
-
-    private async Task<bool> RenameVariable(GDVariableDeclaration variable, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming Variable Declaration");
-
-        var variableName = identifier.Sequence;
-        var classDecl = variable.ClassDeclaration as GDClassDeclaration;
-        if (classDecl == null)
-            return false;
-
-        var ScriptFile = Map.GetScriptByClass(classDecl);
-
-        // Collect all references to this class-level variable
-        var references = new LinkedList<GDMemberReference>();
-
-        // Add the variable declaration itself
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Member = variable,
-            Script = ScriptFile
-        });
-
-        // Find all usages within the class
-        foreach (var usage in classDecl.AllNodes.OfType<GDIdentifierExpression>())
-        {
-            if (usage.Identifier?.Sequence == variableName)
-            {
-                references.AddLast(new GDMemberReference
-                {
-                    Identifier = usage.Identifier,
-                    Script = ScriptFile
-                });
-            }
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(variableName, references)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Rename all usages within the class
-        foreach (var usage in classDecl.AllNodes.OfType<GDIdentifierExpression>())
-        {
-            if (usage.Identifier?.Sequence == variableName)
-                usage.Identifier.Sequence = newName;
-        }
-
-        // Rename the declaration itself
-        identifier.Sequence = newName;
-
-        return true;
-    }
-
-    private async Task<bool> RenameVariable(GDVariableDeclarationStatement variableStatement, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming Local Variable");
-
-        var variableName = identifier.Sequence;
-
-        // Find the containing method by walking up parents
-        GDMethodDeclaration method = null;
-        var parent = variableStatement.Parent;
-        while (parent != null)
-        {
-            if (parent is GDMethodDeclaration m)
-            {
-                method = m;
-                break;
-            }
-            parent = parent.Parent;
-        }
-
-        // Collect all references to this local variable
-        var references = new LinkedList<GDMemberReference>();
-        var classDecl = variableStatement.ClassDeclaration as GDClassDeclaration;
-        var ScriptFile = classDecl != null ? Map.GetScriptByClass(classDecl) : null;
-
-        // Add the variable declaration itself as a reference
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Script = ScriptFile
-        });
-
-        if (method?.Statements != null)
-        {
-            // Collect usages after the declaration within the same method
-            var declarationFound = false;
-            foreach (var statement in method.Statements)
-            {
-                if (statement == variableStatement)
-                {
-                    declarationFound = true;
-                    continue;
-                }
-
-                if (declarationFound)
-                {
-                    foreach (var usage in statement.AllNodes.OfType<GDIdentifierExpression>())
-                    {
-                        if (usage.Identifier?.Sequence == variableName)
-                        {
-                            references.AddLast(new GDMemberReference
-                            {
-                                Identifier = usage.Identifier,
-                                Script = ScriptFile
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(variableName, references)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        if (method?.Statements != null)
-        {
-            // Only rename usages after the declaration within the same method
-            var declarationFound = false;
-            foreach (var statement in method.Statements)
-            {
-                if (statement == variableStatement)
-                {
-                    declarationFound = true;
-                    continue;
-                }
-
-                if (declarationFound)
-                {
-                    foreach (var usage in statement.AllNodes.OfType<GDIdentifierExpression>())
-                    {
-                        if (usage.Identifier?.Sequence == variableName)
-                            usage.Identifier.Sequence = newName;
-                    }
-                }
-            }
-        }
-
-        identifier.Sequence = newName;
-        return true;
-    }
-
-    private async Task<bool> RenameSignal(GDSignalDeclaration signal, GDIdentifier identifier)
-    {
-        Logger.Info("Renaming Signal");
-
-        var signalName = identifier.Sequence;
-        var classDecl = signal.ClassDeclaration as GDClassDeclaration;
-        if (classDecl == null)
-            return false;
-
-        var ScriptFile = Map.GetScriptByClass(classDecl);
-
-        // Collect all references to this signal
-        var references = new LinkedList<GDMemberReference>();
-
-        // Add the signal declaration itself
-        references.AddLast(new GDMemberReference
-        {
-            Identifier = identifier,
-            Member = signal,
-            Script = ScriptFile
-        });
-
-        // Find direct signal references (signal.emit(), signal.connect())
-        foreach (var call in classDecl.AllNodes.OfType<GDCallExpression>())
-        {
-            // Handle direct signal.emit() calls
-            if (call.CallerExpression is GDMemberOperatorExpression memberOp2 &&
-                memberOp2.CallerExpression is GDIdentifierExpression signalIdExpr &&
-                signalIdExpr.Identifier?.Sequence == signalName)
-            {
-                references.AddLast(new GDMemberReference
-                {
-                    Identifier = signalIdExpr.Identifier,
-                    Script = ScriptFile
-                });
-            }
-        }
-
-        RenamingParameters parameters;
-        if ((parameters = await AskParametersAndPrepareIdentifier(signalName, references)) == null)
-            return false;
-
-        var newName = parameters.NewName;
-
-        // Rename direct signal references (signal.emit(), signal.connect())
-        foreach (var call in classDecl.AllNodes.OfType<GDCallExpression>())
-        {
-            // Handle direct signal.emit() calls
-            if (call.CallerExpression is GDMemberOperatorExpression memberOp2 &&
-                memberOp2.CallerExpression is GDIdentifierExpression signalIdExpr &&
-                signalIdExpr.Identifier?.Sequence == signalName)
-            {
-                signalIdExpr.Identifier.Sequence = newName;
-            }
-        }
-
-        // Note: emit_signal("name") and connect("name", ...) use string literals
-        // which are not easily renamable without string manipulation utilities
-        // The user should manually update these calls
-
-        // Rename the declaration itself
-        identifier.Sequence = newName;
-
-        return true;
     }
 
     private async Task<RenamingParameters?> AskParametersAndPrepareIdentifier(string sequence, LinkedList<GDMemberReference>? references = null)

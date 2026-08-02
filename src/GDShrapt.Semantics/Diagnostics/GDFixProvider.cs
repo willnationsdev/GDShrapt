@@ -67,7 +67,7 @@ public class GDFixProvider : IGDFixProvider
 
             case "GD3009": // PropertyNotFound
             case "GD4002": // MethodNotFound
-                foreach (var fix in CreateTypoFixes(node, runtimeProvider, diagnosticCode))
+                foreach (var fix in CreateTypoFixes(node, runtimeProvider, analyzer, diagnosticCode))
                     yield return fix;
                 break;
 
@@ -204,6 +204,7 @@ public class GDFixProvider : IGDFixProvider
     private IEnumerable<GDFixDescriptor> CreateTypoFixes(
         GDNode node,
         IGDRuntimeProvider? runtimeProvider,
+        IGDMemberAccessAnalyzer? analyzer,
         string diagnosticCode)
     {
         if (runtimeProvider == null)
@@ -213,7 +214,7 @@ public class GDFixProvider : IGDFixProvider
         if (string.IsNullOrEmpty(memberName))
             yield break;
 
-        var typeName = GetCallerTypeName(node);
+        var typeName = GetCallerTypeName(node, analyzer);
         if (string.IsNullOrEmpty(typeName))
             yield break;
 
@@ -818,18 +819,17 @@ public class GDFixProvider : IGDFixProvider
         return identifier?.Sequence;
     }
 
-    private string? GetCallerTypeName(GDNode? node)
+    private string? GetCallerTypeName(GDNode? node, IGDMemberAccessAnalyzer? analyzer)
     {
         var memberAccess = FindMemberAccess(node);
         if (memberAccess == null)
             return null;
 
-        // Try to find type from identifier expression
-        if (memberAccess.CallerExpression is GDIdentifierExpression idExpr)
+        if (analyzer != null)
         {
-            // Could look up type in scope, but for now return null
-            // This requires semantic analysis
-            return null;
+            var exprType = analyzer.GetExpressionType(memberAccess.CallerExpression);
+            if (exprType != null && !exprType.IsVariant)
+                return exprType.DisplayName;
         }
 
         return null;

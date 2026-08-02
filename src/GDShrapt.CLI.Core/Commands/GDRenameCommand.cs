@@ -20,6 +20,7 @@ public class GDRenameCommand : IGDCommand
     private readonly bool _dryRun;
     private readonly int? _line;
     private readonly int? _column;
+    private readonly bool _promoteUnionRefs;
 
     public string Name => "rename";
     public string Description => "Rename a symbol across the project";
@@ -33,7 +34,8 @@ public class GDRenameCommand : IGDCommand
         TextWriter? output = null,
         bool dryRun = false,
         int? line = null,
-        int? column = null)
+        int? column = null,
+        bool promoteUnionRefs = true)
     {
         _oldName = oldName;
         _newName = newName;
@@ -44,6 +46,7 @@ public class GDRenameCommand : IGDCommand
         _dryRun = dryRun;
         _line = line;
         _column = column;
+        _promoteUnionRefs = promoteUnionRefs;
     }
 
     public Task<int> ExecuteAsync(CancellationToken cancellationToken = default)
@@ -70,6 +73,9 @@ public class GDRenameCommand : IGDCommand
                 _formatter.WriteError(_output, "Rename handler not available");
                 return Task.FromResult(GDExitCode.Fatal);
             }
+
+            if (renameHandler is GDRenameHandler baseHandler)
+                baseHandler.PromoteFullyCoveredUnionReferences = _promoteUnionRefs;
 
             // Resolve symbol name from position if --line is used
             string oldName;

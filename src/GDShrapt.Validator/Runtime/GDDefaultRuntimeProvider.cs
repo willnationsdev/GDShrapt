@@ -745,7 +745,6 @@ namespace GDShrapt.Reader
 
         public string ResolveOperatorResult(string leftType, string operatorName, string rightType)
         {
-            // Delegate to GDOperatorTypeResolver for now
             GDDualOperatorType? opType = operatorName switch
             {
                 "+" or "Addition" => GDDualOperatorType.Addition,

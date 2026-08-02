@@ -108,9 +108,25 @@ public class GDCrossFileReferenceFinder
             if (memberAccess != null && !isCallerOfMemberAccess)
             {
                 var confidence = gdRef.Confidence;
+                IReadOnlyList<string>? sharedTypes = null;
 
                 if (confidence == GDReferenceConfidence.NameMatch)
                     continue;
+
+                // Union-first: a genuine data-flow union on the receiver takes precedence over the
+                // collapsed single type (which the collector may have classified as Strict). A narrowed
+                // or single-type variable is excluded inside DetermineFlowBasedConfidence, so it won't qualify.
+                var unionVarName = GetRootVariableName(memberAccess.CallerExpression);
+                if (!string.IsNullOrEmpty(unionVarName))
+                {
+                    var unionConfidence = DetermineFlowBasedConfidence(
+                        semanticModel.GetVariableTypeAt(unionVarName, memberAccess), declaringTypeName, out var unionShared);
+                    if (unionConfidence == GDReferenceConfidence.Union)
+                    {
+                        confidence = GDReferenceConfidence.Union;
+                        sharedTypes = unionShared;
+                    }
+                }
 
                 if (confidence == GDReferenceConfidence.Potential)
                 {
@@ -118,7 +134,7 @@ public class GDCrossFileReferenceFinder
                     if (!string.IsNullOrEmpty(varName))
                     {
                         var flowConfidence = DetermineFlowBasedConfidence(
-                            semanticModel.GetVariableTypeAt(varName, memberAccess), declaringTypeName);
+                            semanticModel.GetVariableTypeAt(varName, memberAccess), declaringTypeName, out sharedTypes);
                         if (flowConfidence != null)
                             confidence = flowConfidence.Value;
                         // else: keep Potential — flow has no additional info
@@ -138,7 +154,7 @@ public class GDCrossFileReferenceFinder
                         if (!string.IsNullOrEmpty(varName))
                         {
                             var flowConfidence = DetermineFlowBasedConfidence(
-                                semanticModel.GetVariableTypeAt(varName, memberAccess), declaringTypeName);
+                                semanticModel.GetVariableTypeAt(varName, memberAccess), declaringTypeName, out sharedTypes);
                             if (flowConfidence != null)
                                 confidence = flowConfidence.Value;
                             else
@@ -154,7 +170,8 @@ public class GDCrossFileReferenceFinder
                     script,
                     gdRef.ReferenceNode,
                     confidence,
-                    gdRef.ConfidenceReason ?? GetConfidenceReason(memberAccess, confidence, semanticModel, declaringTypeName));
+                    gdRef.ConfidenceReason ?? GetConfidenceReason(memberAccess, confidence, semanticModel, declaringTypeName),
+                    confidence == GDReferenceConfidence.Union ? sharedTypes : null);
             }
             else if (isInherited)
             {
@@ -197,14 +214,31 @@ public class GDCrossFileReferenceFinder
                     continue;
 
                 var confidence = GDReferenceConfidence.Strict;
+                IReadOnlyList<string>? sharedTypes = null;
+
+                var memberAccessNode = maRef.ReferenceNode as GDMemberOperatorExpression
+                    ?? maRef.ReferenceNode.Parent as GDMemberOperatorExpression
+                    ?? (maRef.ReferenceNode as GDCallExpression)?.CallerExpression as GDMemberOperatorExpression;
+
+                // Union-first: a genuine data-flow union on the receiver wins over the collapsed
+                // caller type — regardless of whether the indexed caller is Variant.
+                var unionVarName = memberAccessNode != null
+                    ? GetRootVariableName(memberAccessNode.CallerExpression) : null;
+                if (!string.IsNullOrEmpty(unionVarName))
+                {
+                    var unionConfidence = DetermineFlowBasedConfidence(
+                        semanticModel.GetVariableTypeAt(unionVarName, memberAccessNode), declaringTypeName, out var unionShared);
+                    if (unionConfidence == GDReferenceConfidence.Union)
+                    {
+                        confidence = GDReferenceConfidence.Union;
+                        sharedTypes = unionShared;
+                    }
+                }
 
                 string? duckVarName = null;
-                if (isVariantCaller)
+                if (confidence != GDReferenceConfidence.Union && isVariantCaller)
                 {
                     confidence = GDReferenceConfidence.Potential;
-
-                    var memberAccessNode = maRef.ReferenceNode as GDMemberOperatorExpression
-                        ?? maRef.ReferenceNode.Parent as GDMemberOperatorExpression;
 
                     if (memberAccessNode != null)
                     {
@@ -212,7 +246,7 @@ public class GDCrossFileReferenceFinder
                         if (!string.IsNullOrEmpty(duckVarName))
                         {
                             var flowConfidence = DetermineFlowBasedConfidence(
-                                semanticModel.GetVariableTypeAt(duckVarName, memberAccessNode), declaringTypeName);
+                                semanticModel.GetVariableTypeAt(duckVarName, memberAccessNode), declaringTypeName, out sharedTypes);
                             if (flowConfidence != null)
                                 confidence = flowConfidence.Value;
                         }
@@ -226,9 +260,11 @@ public class GDCrossFileReferenceFinder
                 if (!seen.Add((line, col)))
                     continue;
 
-                var reason = isVariantCaller && !string.IsNullOrEmpty(duckVarName)
-                    ? $"Duck-typed access on '{duckVarName}'"
-                    : $"Member access via '{callerType}.{memberName}'";
+                var reason = confidence == GDReferenceConfidence.Union
+                    ? $"Shared across {string.Join("|", sharedTypes ?? System.Array.Empty<string>())}"
+                    : isVariantCaller && !string.IsNullOrEmpty(duckVarName)
+                        ? $"Duck-typed access on '{duckVarName}'"
+                        : $"Member access via '{callerType}.{memberName}'";
 
                 yield return new GDCrossFileReference(
                     script,
@@ -236,7 +272,8 @@ public class GDCrossFileReferenceFinder
                     line,
                     col,
                     confidence,
-                    reason);
+                    reason,
+                    confidence == GDReferenceConfidence.Union ? sharedTypes : null);
             }
         }
 
@@ -276,49 +313,14 @@ public class GDCrossFileReferenceFinder
     }
 
     /// <summary>
-    /// Determines the confidence level for a member access reference.
-    /// Uses flow-sensitive type data as the single source of truth.
-    /// </summary>
-    private GDReferenceConfidence DetermineConfidence(
-        GDMemberOperatorExpression memberAccess,
-        string targetTypeName,
-        GDSemanticModel semanticModel)
-    {
-        if (memberAccess.CallerExpression == null)
-            return GDReferenceConfidence.Potential;
-
-        // 1. Get caller expression type
-        var callerType = semanticModel.GetTypeForNode(memberAccess.CallerExpression);
-
-        // 2. If type is known
-        if (!string.IsNullOrEmpty(callerType))
-        {
-            if (IsTypeCompatible(callerType, targetTypeName))
-                return GDReferenceConfidence.Strict;
-            else
-                return GDReferenceConfidence.NameMatch;
-        }
-
-        // 3. Type unknown — query flow-sensitive data at this location
-        var varName = GetRootVariableName(memberAccess.CallerExpression);
-        if (varName != null)
-        {
-            var flowConfidence = DetermineFlowBasedConfidence(
-                semanticModel.GetVariableTypeAt(varName, memberAccess), targetTypeName);
-            if (flowConfidence != null)
-                return flowConfidence.Value;
-        }
-
-        return GDReferenceConfidence.Potential;
-    }
-
-    /// <summary>
     /// Determines confidence from flow-sensitive variable type data.
     /// Returns null if the flow type provides no useful information (skip the reference).
     /// </summary>
     private GDReferenceConfidence? DetermineFlowBasedConfidence(
-        GDFlowVariableType? flowType, string declaringTypeName)
+        GDFlowVariableType? flowType, string declaringTypeName, out IReadOnlyList<string>? sharedTypes)
     {
+        sharedTypes = null;
+
         if (flowType == null)
             return null;
 
@@ -335,11 +337,21 @@ public class GDCrossFileReferenceFinder
             }
         }
 
-        // Union — check if target type is among union members
+        // Union — check if the declaring type is among the union members. The member set is read
+        // from CurrentType.Types (the raw flow union, which preserves concrete members) rather than
+        // EffectiveType (which may collapse to a common base). It is recorded so the reference can
+        // be shown as "Shared (A|B)".
         if (flowType.CurrentType.IsUnion)
         {
             if (flowType.CurrentType.Types.Any(t => IsTypeCompatible(t.DisplayName, declaringTypeName)))
+            {
+                sharedTypes = flowType.CurrentType.Types
+                    .Select(t => t.DisplayName)
+                    .Where(n => !string.IsNullOrEmpty(n) && n != GDWellKnownTypes.Variant)
+                    .Distinct()
+                    .ToList();
                 return GDReferenceConfidence.Union;
+            }
         }
 
         // Duck type — variable has duck constraints, keep as Potential
@@ -684,11 +696,18 @@ public class GDCrossFileReference
     /// </summary>
     public string? FilePath => Script.FullPath;
 
+    /// <summary>
+    /// For union references (Confidence == Union): the union member type names this reference is
+    /// shared across (e.g. ["Enemy", "Player"]). Null for non-union references.
+    /// </summary>
+    public IReadOnlyList<string>? SharedTypes { get; }
+
     public GDCrossFileReference(
         GDScriptFile script,
         GDNode node,
         GDReferenceConfidence confidence,
-        string? reason = null)
+        string? reason = null,
+        IReadOnlyList<string>? sharedTypes = null)
     {
         Script = script;
         Node = node;
@@ -696,6 +715,7 @@ public class GDCrossFileReference
         Column = node.StartColumn;
         Confidence = confidence;
         Reason = reason;
+        SharedTypes = sharedTypes;
     }
 
     public GDCrossFileReference(
@@ -704,7 +724,8 @@ public class GDCrossFileReference
         int line,
         int column,
         GDReferenceConfidence confidence,
-        string? reason = null)
+        string? reason = null,
+        IReadOnlyList<string>? sharedTypes = null)
     {
         Script = script;
         Node = node;
@@ -712,6 +733,7 @@ public class GDCrossFileReference
         Column = column;
         Confidence = confidence;
         Reason = reason;
+        SharedTypes = sharedTypes;
     }
 
     public override string ToString() =>

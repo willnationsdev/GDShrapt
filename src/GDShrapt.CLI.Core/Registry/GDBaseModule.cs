@@ -69,6 +69,15 @@ public sealed class GDBaseModule : IGDModule
         // Folding range
         registry.Register<IGDFoldingRangeHandler>(new GDFoldingRangeHandler(project));
 
+        // Selection range (expand/shrink selection)
+        registry.Register<IGDSelectionRangeHandler>(new GDSelectionRangeHandler(project));
+
+        // Document links (preload/load/extends paths → files)
+        registry.Register<IGDDocumentLinkHandler>(new GDDocumentLinkHandler(project));
+
+        // File rename → update res:// references across the project
+        registry.Register<IGDFileRenameHandler>(new GDFileRenameHandler(project));
+
         // Analysis handlers — all routed through the project semantic model
         registry.Register<IGDMetricsHandler>(new GDMetricsHandler(projectModel));
         registry.Register<IGDDeadCodeHandler>(new GDDeadCodeHandler(projectModel));

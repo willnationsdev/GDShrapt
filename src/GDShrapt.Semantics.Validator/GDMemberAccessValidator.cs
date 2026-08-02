@@ -17,6 +17,8 @@ public class GDMemberAccessValidator : GDValidationVisitor
     private readonly IGDMemberAccessAnalyzer _analyzer;
     private readonly IGDRuntimeProvider _runtimeProvider;
     private readonly GDDiagnosticSeverity _untypedSeverity;
+    private readonly bool _checkStaticInstanceCalls;
+    private readonly GDDiagnosticSeverity _staticInstanceCallSeverity;
 
     // Methods on Object that are always available
     private static readonly HashSet<string> ObjectMethods = new HashSet<string>
@@ -37,12 +39,16 @@ public class GDMemberAccessValidator : GDValidationVisitor
     public GDMemberAccessValidator(
         GDValidationContext context,
         IGDMemberAccessAnalyzer analyzer,
-        GDDiagnosticSeverity untypedSeverity = GDDiagnosticSeverity.Warning)
+        GDDiagnosticSeverity untypedSeverity = GDDiagnosticSeverity.Warning,
+        bool checkStaticInstanceCalls = false,
+        GDDiagnosticSeverity staticInstanceCallSeverity = GDDiagnosticSeverity.Hint)
         : base(context)
     {
         _analyzer = analyzer;
         _runtimeProvider = context.RuntimeProvider;
         _untypedSeverity = untypedSeverity;
+        _checkStaticInstanceCalls = checkStaticInstanceCalls;
+        _staticInstanceCallSeverity = staticInstanceCallSeverity;
     }
 
     public void Validate(GDNode? node)
@@ -324,6 +330,16 @@ public class GDMemberAccessValidator : GDValidationVisitor
                 return;
             }
 
+            // GD9002: static method called on an instance of an inner class. Off by default (style hint).
+            if (_checkStaticInstanceCalls && memberInfo.IsStatic && !isCallingOnClassName)
+            {
+                ReportDiagnostic(
+                    _staticInstanceCallSeverity,
+                    GDDiagnosticCode.StaticMethodCalledOnInstance,
+                    $"Static method '{methodName}' is called on an instance of '{typeName}'. Call it on the type instead.",
+                    call);
+            }
+
             // Skip argument count validation for inner class methods (we don't have reliable info)
             return;
         }
@@ -345,6 +361,16 @@ public class GDMemberAccessValidator : GDValidationVisitor
                 $"'{methodName}' on type '{typeName}' is not a method",
                 call);
             return;
+        }
+
+        // GD9002: static method called on an instance. GDScript permits this; off by default (style hint).
+        if (_checkStaticInstanceCalls && memberInfo.IsStatic && !IsCallingOnClassName(memberExpr, typeName))
+        {
+            ReportDiagnostic(
+                _staticInstanceCallSeverity,
+                GDDiagnosticCode.StaticMethodCalledOnInstance,
+                $"Static method '{methodName}' is called on an instance of '{typeName}'. Call it on the type instead.",
+                call);
         }
 
         // Validate argument count

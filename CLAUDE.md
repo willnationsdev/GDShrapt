@@ -214,7 +214,7 @@ Assertion helpers (`GDShrapt.Tests.Common`):
 
 ### Diagnostics Verification (TDD)
 
-All 1,065 diagnostics are verified using test-driven development. Each diagnostic in test files must have a verification marker.
+All 940 diagnostics are verified using test-driven development. Each diagnostic in test files must have a verification marker.
 
 **Marker Format:**
 ```gdscript

@@ -2847,6 +2847,10 @@ test_scripts/type_guards.gd
     241:10 data -> Dictionary (base: Dictionary) # OK
     244:10 data -> Dictionary (base: Dictionary) # OK
 
+  assert_type_guard()
+    251:8 value -> Dictionary (base: Variant) # OK
+    253:8 value -> Dictionary (base: Variant) # OK
+
   ternary_with_guard()
     259:8 result -> float (base: float) # OK
 

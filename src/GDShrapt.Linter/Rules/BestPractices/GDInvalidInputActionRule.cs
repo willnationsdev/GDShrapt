@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using GDShrapt.Reader;
 
 namespace GDShrapt.Linter
@@ -178,12 +179,12 @@ namespace GDShrapt.Linter
             if (BuiltInActions.Contains(actionName))
                 return true;
 
-            // If we have project context, check there
-            // For now, we only validate against built-in actions
-            // TODO: Add IGDProjectRuntimeProvider integration to check project.godot
+            // Without project context, accept unknown names to avoid false positives.
+            var projectActions = Options?.ProjectInputActions;
+            if (projectActions == null)
+                return true;
 
-            // Return true for non-built-in to avoid false positives without project context
-            return true;
+            return projectActions.Contains(actionName);
         }
 
         private string GetStringValue(GDStringExpression strExpr)

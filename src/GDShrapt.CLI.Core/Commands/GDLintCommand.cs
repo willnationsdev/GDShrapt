@@ -118,6 +118,14 @@ public class GDLintCommand : GDProjectCommandBase
         var linterOptions = GDLinterOptionsFactory.FromConfig(config);
         _optionsOverrides?.ApplyTo(linterOptions);
 
+        // Feed project.godot input actions to GDL246 (only when that rule is active).
+        if (linterOptions.WarnInvalidInputAction)
+        {
+            var projectGodot = GDGodotProjectParser.FindProjectGodot(projectRoot);
+            if (projectGodot != null)
+                linterOptions.ProjectInputActions = GDGodotProjectParser.ParseInputActions(projectGodot);
+        }
+
         var linter = new GDLinter(linterOptions);
 
         if (_onlyRules != null && _onlyRules.Count > 0)

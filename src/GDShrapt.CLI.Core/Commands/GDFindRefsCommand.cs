@@ -208,7 +208,8 @@ public class GDFindRefsCommand : IGDCommand
                 IsSignalConnection = loc.IsSignalConnection,
                 SignalName = loc.SignalName,
                 IsSceneSignal = loc.IsSceneSignal,
-                ReceiverTypeName = loc.ReceiverTypeName
+                ReceiverTypeName = loc.ReceiverTypeName,
+                SharedTypes = loc.SharedTypes
             }).ToList(),
             Overrides = g.Overrides.Select(o => MapGroup(o, projectRoot)).ToList()
         };

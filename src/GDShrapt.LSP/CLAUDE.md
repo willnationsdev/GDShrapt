@@ -23,6 +23,18 @@ They convert LSP protocol (0-based positions) to CLI.Core (1-based positions).
 | `GDLspInlayHintHandler` | `IGDInlayHintHandler` | textDocument/inlayHint |
 | `GDLspDocumentHighlightHandler` | `IGDHighlightHandler` + `IGDGoToDefHandler` | textDocument/documentHighlight |
 | `GDLspSemanticTokensHandler` | `IGDSemanticTokensHandler` | textDocument/semanticTokens/full |
+| `GDLspPrepareRenameHandler` | `IGDRenameHandler` | textDocument/prepareRename |
+| `GDTypeDefinitionLspHandler` | `IGDTypeDefinitionHandler` | textDocument/typeDefinition |
+| `GDImplementationLspHandler` | `IGDImplementationHandler` | textDocument/implementation |
+| `GDLspCallHierarchyHandler` | `IGDCallHierarchyHandler` | textDocument/prepareCallHierarchy, callHierarchy/incomingCalls, callHierarchy/outgoingCalls |
+| `GDLspFoldingRangeHandler` | `IGDFoldingRangeHandler` | textDocument/foldingRange |
+| `GDLspCodeLensHandler` | `IGDCodeLensHandler` | textDocument/codeLens |
+| `GDCodeLensReferencesHandler` | `IGDCodeLensHandler` + `IGDFindRefsHandler` | gdshrapt/codeLensReferences |
+| `GDWorkspaceSymbolHandler` | (project AST scan) | workspace/symbol |
+| `GDLspSelectionRangeHandler` | `IGDSelectionRangeHandler` | textDocument/selectionRange |
+| `GDLspDocumentLinkHandler` | `IGDDocumentLinkHandler` | textDocument/documentLink |
+| `GDRangeFormattingHandler` | `IGDFormatHandler` | textDocument/rangeFormatting |
+| `GDLspFileRenameHandler` | `IGDFileRenameHandler` | workspace/willRenameFiles |
 | `GDDiagnosticPublisher` | (uses GDScriptProject) | publishDiagnostics |
 
 ## Position Conversion
@@ -39,8 +51,13 @@ int lspCharacter = cliColumn - 1;
 
 ## Capabilities
 
-**Completion triggers:** `.`, `:`, `(`
+**Document sync:** Incremental (`GDDocumentManager.ApplyChanges` splices `{range, text}` edits).
+**Completion triggers:** `.`, `:`, `(`, `$`, `/`
 **Signature help triggers:** `(`, `,`
+
+**Also advertised:** `selectionRangeProvider`, `documentLinkProvider`, `documentRangeFormattingProvider`,
+`foldingRangeProvider`, `callHierarchyProvider`, `typeDefinitionProvider`, `implementationProvider`,
+`workspaceSymbolProvider`, and `workspace.fileOperations.willRename` (res:// reference rewrite on rename).
 
 **Semantic token legend:**
 - 10 token types: `variable`, `parameter`, `property`, `function`, `class`, `enum`, `enumMember`, `event`, `decorator`, `type`
@@ -57,8 +74,12 @@ int lspCharacter = cliColumn - 1;
 ## Known Limitations
 
 1. **Strict Mode Only** - LSP does not load Pro module, no heuristic edits
-2. **No Batch Operations** - Single-file operations only
-3. **Position Conversion** - Off-by-one errors possible at file boundaries
+2. **Single-file edits** - the exception is `workspace/willRenameFiles`, which rewrites res://
+   `preload`/`extends` references across files (exact res:// paths only; relative paths not rewritten)
+3. **Range formatting** - reformats the whole document (the safe formatter is context-dependent), not a
+   sub-range
+4. **Position conversion** - EOF/EOL/multibyte edge cases are unit-covered (`GDDocumentSyncTests`,
+   `GDSelectionRangeHandlerTests`)
 
 ## Key Files
 

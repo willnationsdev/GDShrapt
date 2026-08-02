@@ -40,12 +40,13 @@ public class GDDiagnosticPublisher : IAsyncDisposable
         GDScriptProject project,
         TimeSpan? debounceDelay = null,
         GDProjectConfig? config = null,
-        Task? analysisReady = null)
+        Task? analysisReady = null,
+        TimeSpan? semanticDebounceDelay = null)
     {
         _transport = transport;
         _project = project;
         _debounceDelay = debounceDelay ?? TimeSpan.FromMilliseconds(300);
-        _semanticDebounceDelay = TimeSpan.FromMilliseconds(800);
+        _semanticDebounceDelay = semanticDebounceDelay ?? TimeSpan.FromMilliseconds(800);
         _config = config;
         _analysisReady = analysisReady;
         _diagnosticsService = config != null

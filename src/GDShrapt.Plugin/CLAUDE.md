@@ -36,14 +36,17 @@ Godot Editor integration plugin. Production-ready (~95% complete).
 | AboutPanel | Plugin info |
 | TodoTagsSettingsPanel | Tag configuration |
 
-## Completion Service
+## Completion
 
-- **Symbol completions** (Ctrl+Tab): locals, methods, signals, constants, keywords
-- **Member access** (after `.`): methods, properties from Godot types
+Completion **content** comes from the core `IGDCompletionHandler` (single source of truth, shared with
+CLI/LSP). The Plugin only detects the editor context from the live buffer (`GDCompletionContextBuilder`),
+maps it to a `GDCompletionRequest`, and renders the result in the popup (`GDCompletionItemConverter` →
+`GDCompletionPopup`). Provides:
+
+- **Symbol completions**: locals, methods, signals, constants, keywords
+- **Member access** (after `.`): methods, properties from Godot/project types
 - **Type annotations** (after `:`): built-in types, Godot classes, project types
-- 90+ built-in Godot functions
-- 40+ GDScript keywords
-- 7 snippets: for, while, if, func, _ready, _process, _physics_process
+- Built-in Godot functions, GDScript keywords, and snippets (all from the handler)
 
 ## Refactoring Actions (9)
 
@@ -110,12 +113,39 @@ Godot navigates to correct line
 | `ProblemsDock.cs` | UI display (+1 for user) and navigation |
 | `GDShraptPlugin.cs` | EditScript navigation (expects 1-based) |
 
+## Core integration
+
+The Plugin is a thin consumer of the shared CLI.Core handler registry (the same path as the LSP):
+it builds ONE `GDShrapt.Semantics.GDScriptProject` (analyzed once) and loads `GDServiceRegistry` +
+`GDBaseModule` (`GDShraptPlugin.cs`), then resolves `IGD*Handler` via `Plugin.ServiceRegistry` and
+renders the result. Routed through handlers: **completion** (`IGDCompletionHandler`), **find references**
+(`IGDFindRefsHandler`), **go-to-definition** (`IGDGoToDefHandler`), **rename** (`IGDRenameHandler`,
+cross-file), **format** (`IGDFormatHandler`), **diagnostics** (`GDDiagnosticsHandler`), **type flow**
+(`IGDTypeFlowHandler`). Position conversion between Godot (0-based) and the handler contract lives in one
+place — `Infrastructure/GDPluginPositionAdapter.cs`.
+
+**Kept Plugin-local (Godot glue / no handler equivalent):** all UI (docks/panels/dialogs/controls),
+`TabController`, gutters, the completion popup, scene watching; the node-path/scene rename
+(`RenameIdentifierCommand` `RenamePathListNode*` via `GDRenameService.PlanNodePathRename` +
+`NodeRenamingDialog`); and the interactive single-file refactoring actions (`Refactoring/Actions/*` over
+`GDExtract*`/`GDGenerate*`/… services — they need action-specific dialogs/preview the code-action handler
+can't express).
+
 ## Known Limitations
 
 1. **Coordinate Systems** - Mixed 0-based/1-based across components (see table above)
 2. **Background Analysis** - May lag on large projects (priority queue helps)
 3. **Scene Sync** - Node renames only, not path refactoring
 4. **TypeFlow** - Single method visualization only
+5. **Rename preview** - symbol rename applies cross-file via the handler, but the rename dialog does not
+   yet list the multi-file edit set before applying (name entry only)
+6. **REPL (experimental)** - evaluates expressions against the live scene context: literals, identifiers,
+   member/index/call, operators (incl. `is`/`in`), ternary, array/dictionary literals, node access
+   (`$Path`/`%Unique`), and `&"name"`/`^"path"` literals. `await`/`preload`/assignment/`match` are not
+   evaluated (a clear message is shown). Godot-runtime only — not covered by CI tests; keeps its
+   experimental disclaimer by design.
+7. **TypeFlow apply** - "add type guard" and "generate interface from duck types" are **preview-only** in
+   Base (copy the result to apply manually). Executing them is a Pro capability (STATE.md Rule 20)
 
 ## Other Features
 
@@ -139,9 +169,10 @@ Commands/
 └── FindReferencesCommand.cs
 
 Completion/
-├── GDCompletionService.cs
-├── GDCompletionContextBuilder.cs
-└── GDCompletionItem.cs
+├── GDCompletionContext.cs       (editor-side context detection)
+├── GDCompletionItem.cs          (popup item model)
+├── GDCompletionItemConverter.cs (CLI.Core item → popup item)
+└── GDCompletionPopup.cs         (popup UI)
 
 Diagnostics/
 ├── GDPluginDiagnosticService.cs

@@ -78,8 +78,7 @@
                 return previous;
             }
 
-            // TODO: may lose the data about syntax
-            // Remove 'negate' operator for number expression. Just make the number negative.
+            // Collapse a 'negate' operator on a number literal into a negative number.
             if (OperatorType == GDSingleOperatorType.Negate && TargetExpression is GDNumberExpression numberExpression)
             {
                 numberExpression.Number.Negate();

@@ -192,42 +192,4 @@ internal static class GDTypeInferenceUtilities
         return true;
     }
 
-    /// <summary>
-    /// Splits generic type arguments, respecting nested brackets.
-    /// For example: "int, Array[String]" -> ["int", "Array[String]"]
-    /// </summary>
-    private static string[] SplitGenericArgs(string content)
-    {
-        var parts = new System.Collections.Generic.List<string>();
-        var current = new System.Text.StringBuilder();
-        int depth = 0;
-
-        foreach (char c in content)
-        {
-            if (c == '[')
-            {
-                depth++;
-                current.Append(c);
-            }
-            else if (c == ']')
-            {
-                depth--;
-                current.Append(c);
-            }
-            else if (c == ',' && depth == 0)
-            {
-                parts.Add(current.ToString());
-                current.Clear();
-            }
-            else
-            {
-                current.Append(c);
-            }
-        }
-
-        if (current.Length > 0)
-            parts.Add(current.ToString());
-
-        return parts.ToArray();
-    }
 }

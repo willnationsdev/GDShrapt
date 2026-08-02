@@ -27,6 +27,15 @@ public class GDRenameService
     }
 
     /// <summary>
+    /// When true (default), a union/shared reference is treated as a strict edit only if every
+    /// type in its <see cref="GDSymbolReference.SharedTypes"/> set is covered by a declaration being
+    /// renamed in the same operation — so all possible resolutions produce the identical edit and the
+    /// rewrite is risk-free. When false, union/shared references are always kept as potential edits
+    /// (shown but never auto-applied).
+    /// </summary>
+    public bool PromoteFullyCoveredUnionReferences { get; set; } = true;
+
+    /// <summary>
     /// Plans a rename operation for a symbol.
     /// </summary>
     /// <param name="symbol">The symbol to rename.</param>
@@ -71,6 +80,7 @@ public class GDRenameService
         // Deduplicate edits
         strictEdits = DeduplicateEdits(strictEdits);
         potentialEdits = DeduplicateEdits(potentialEdits);
+        RemoveStrictDuplicatesFromPotential(strictEdits, potentialEdits);
 
         // Sort edits by file, then by position (reverse order for applying)
         var sortedStrict = SortEditsReverse(strictEdits);
@@ -127,33 +137,6 @@ public class GDRenameService
             edits, filesModified, oldName, newName, confidence, skipExistingFiles);
     }
 
-    private static void AddCrossFileRefsToEdits(
-        IEnumerable<GDCrossFileReference> references,
-        List<GDTextEdit> edits,
-        HashSet<string> filesModified,
-        string oldName,
-        string newName,
-        GDReferenceConfidence confidence,
-        bool skipExistingFiles = false)
-    {
-        AddRefsToEdits(
-            references.Select(r => (r.FilePath, r.Line, r.Column, r.Reason)),
-            edits, filesModified, oldName, newName, confidence, skipExistingFiles);
-    }
-
-    private static void AddCrossFileReferencesToEdits(
-        GDCrossFileReferenceResult crossFileRefs,
-        List<GDTextEdit> strictEdits,
-        List<GDTextEdit> potentialEdits,
-        HashSet<string> filesModified,
-        string oldName,
-        string newName,
-        bool skipExistingFiles = false)
-    {
-        AddCrossFileRefsToEdits(crossFileRefs.StrictReferences, strictEdits, filesModified, oldName, newName, GDReferenceConfidence.Strict, skipExistingFiles);
-        AddCrossFileRefsToEdits(crossFileRefs.PotentialReferences, potentialEdits, filesModified, oldName, newName, GDReferenceConfidence.Potential, skipExistingFiles);
-    }
-
     /// <summary>
     /// Sorts edits in reverse order (by file, then by line desc, then by column desc).
     /// This ensures edits can be applied safely without shifting positions.
@@ -197,11 +180,21 @@ public class GDRenameService
                 var symbol = model?.FindSymbol(oldName);
 
                 if (symbol != null)
-                    return PlanRename(symbol, newName);
-
-                // Check if this is a class_name
-                if (targetScript.TypeName == oldName)
+                {
+                    // If this symbol is bridge/union-connected to other same-name hierarchies, defer to the
+                    // bridge-merge path below so the rename covers all connected declarations (and shared
+                    // union references can be promoted). Otherwise rename the single symbol's hierarchy.
+                    var bridgeConnected = _projectModel != null
+                        && new GDSymbolReferenceCollector(_project, _projectModel)
+                            .CollectAllReferences(oldName, filterFilePath).IsBridgeConnected;
+                    if (!bridgeConnected)
+                        return PlanRename(symbol, newName);
+                }
+                else if (targetScript.TypeName == oldName)
+                {
+                    // Check if this is a class_name
                     return PlanClassNameRename(targetScript, oldName, newName);
+                }
             }
         }
 
@@ -274,6 +267,7 @@ public class GDRenameService
 
                     strictEdits = DeduplicateEdits(strictEdits);
                     potentialEdits = DeduplicateEdits(potentialEdits);
+                    RemoveStrictDuplicatesFromPotential(strictEdits, potentialEdits);
                     var warnings = CollectStringReferenceWarnings(oldName);
                     var symbolKind = definitions.First().Symbol.Kind;
                     warnings.AddRange(CollectReflectionWarnings(oldName, symbolKind));
@@ -312,6 +306,7 @@ public class GDRenameService
 
                 strictEdits = DeduplicateEdits(strictEdits);
                 potentialEdits = DeduplicateEdits(potentialEdits);
+                RemoveStrictDuplicatesFromPotential(strictEdits, potentialEdits);
                 var warnings = CollectStringReferenceWarnings(oldName);
                 var symbolKind = definitions.First().Symbol.Kind;
                 warnings.AddRange(CollectReflectionWarnings(oldName, symbolKind));
@@ -613,6 +608,12 @@ public class GDRenameService
         // References from these files should be excluded from strict edits.
         var unrelatedFiles = BuildUnrelatedFilesSet(collectedRefs, declaringTypeName);
 
+        // Types whose member declaration is being renamed in this operation. A union/shared reference
+        // is promotable to a strict edit only when every one of its shared types is covered here.
+        var renamedTypes = PromoteFullyCoveredUnionReferences
+            ? BuildRenamedDeclaringTypes(collectedRefs)
+            : null;
+
         foreach (var sref in collectedRefs.References)
         {
             if (sref.FilePath == null) continue;
@@ -713,8 +714,19 @@ public class GDRenameService
                 if (isFromUnrelatedHierarchy && sref.Confidence == GDReferenceConfidence.Strict)
                     continue;
 
-                // Regular references: declaration, read, write, super call, type usage, override
-                var targetEdits = sref.Confidence == GDReferenceConfidence.Strict
+                // Regular references: declaration, read, write, super call, type usage, override.
+                // A union/shared reference is promoted to a strict edit only when every one of its
+                // shared types is covered by a declaration being renamed in this operation, so all
+                // possible resolutions produce the identical edit (risk-free).
+                var isPromotedUnion = sref.Confidence == GDReferenceConfidence.Union
+                    && renamedTypes != null
+                    && IsUnionReferenceFullyCovered(sref, renamedTypes);
+
+                var effectiveConfidence = isPromotedUnion
+                    ? GDReferenceConfidence.Strict
+                    : sref.Confidence;
+
+                var targetEdits = effectiveConfidence == GDReferenceConfidence.Strict
                     ? strictEdits : potentialEdits;
 
                 // Duck-typed cross-file references get provenance
@@ -743,9 +755,12 @@ public class GDRenameService
                     editReason = "class_name declaration";
                 }
 
+                if (isPromotedUnion && sref.SharedTypes is { Count: > 0 })
+                    editReason = $"Shared across {string.Join("|", sref.SharedTypes)} (all renamed)";
+
                 targetEdits.Add(new GDTextEdit(
                     sref.FilePath, line, col, oldName, newName,
-                    sref.Confidence, editReason)
+                    effectiveConfidence, editReason)
                 {
                     DetailedProvenance = editProvenance,
                     ProvenanceVariableName = editProvenanceVar
@@ -753,6 +768,50 @@ public class GDRenameService
                 filesModified.Add(sref.FilePath);
             }
         }
+    }
+
+    /// <summary>
+    /// Builds the set of type names whose member declaration is being renamed in this operation.
+    /// Used to decide whether a union/shared reference is fully covered (all resolutions renamed).
+    /// </summary>
+    private static HashSet<string> BuildRenamedDeclaringTypes(GDSymbolReferences collectedRefs)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var r in collectedRefs.References)
+        {
+            if (r.Kind != GDSymbolReferenceKind.Declaration && r.Kind != GDSymbolReferenceKind.Override)
+                continue;
+
+            var typeName = r.Script?.TypeName;
+            if (!string.IsNullOrEmpty(typeName))
+                set.Add(typeName!);
+        }
+        return set;
+    }
+
+    /// <summary>
+    /// A union/shared reference is fully covered when every type in its shared set has its member
+    /// renamed in this operation (directly, or via inheritance from a renamed declaring type) — so
+    /// every possible resolution of the receiver yields the identical edit and the rewrite is safe.
+    /// </summary>
+    private bool IsUnionReferenceFullyCovered(GDSymbolReference sref, HashSet<string> renamedTypes)
+    {
+        var shared = sref.SharedTypes;
+        if (shared == null || shared.Count == 0)
+            return false;
+
+        foreach (var sharedType in shared)
+        {
+            if (string.IsNullOrEmpty(sharedType))
+                return false;
+
+            var covered = renamedTypes.Contains(sharedType)
+                || renamedTypes.Any(rt => IsTypeCompatible(sharedType, rt));
+
+            if (!covered)
+                return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -899,6 +958,24 @@ public class GDRenameService
         return result;
     }
 
+    /// <summary>
+    /// Removes from <paramref name="potentialEdits"/> any edit whose position is already a strict edit.
+    /// A position is applied at most once; a strict (or promoted-union) edit always wins over a
+    /// potential edit at the same location.
+    /// </summary>
+    private static void RemoveStrictDuplicatesFromPotential(
+        List<GDTextEdit> strictEdits, List<GDTextEdit> potentialEdits)
+    {
+        if (strictEdits.Count == 0 || potentialEdits.Count == 0)
+            return;
+
+        var strictKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var edit in strictEdits)
+            strictKeys.Add($"{edit.FilePath}|{edit.Line}:{edit.Column}");
+
+        potentialEdits.RemoveAll(edit => strictKeys.Contains($"{edit.FilePath}|{edit.Line}:{edit.Column}"));
+    }
+
     private GDScriptFile? FindScriptContainingSymbol(GDSymbolInfo symbol)
     {
         foreach (var script in _project.ScriptFiles)
@@ -982,64 +1059,6 @@ public class GDRenameService
         }
 
         return roots;
-    }
-
-    private List<GDTextEdit> CollectEditsFromScript(GDScriptFile script, GDSymbolInfo symbol, string oldName, string newName)
-    {
-        var edits = new List<GDTextEdit>();
-        var semanticModel = script.SemanticModel;
-        var filePath = script.FullPath;
-
-        if (semanticModel == null || filePath == null)
-            return edits;
-
-        // Add declaration
-        if (symbol.DeclarationIdentifier != null)
-        {
-            edits.Add(new GDTextEdit(filePath,
-                symbol.DeclarationIdentifier.StartLine + 1,
-                symbol.DeclarationIdentifier.StartColumn + 1,
-                oldName, newName));
-        }
-
-        // Add all references
-        var refs = semanticModel.GetReferencesTo(symbol);
-        foreach (var reference in refs)
-        {
-            if (reference.ReferenceNode == null)
-                continue;
-
-            // Skip if it's the declaration (already added)
-            if (reference.ReferenceNode == symbol.DeclarationNode)
-                continue;
-
-            var identToken = reference.IdentifierToken;
-            if (identToken == null)
-                continue;
-
-            edits.Add(new GDTextEdit(filePath,
-                identToken.StartLine + 1,
-                identToken.StartColumn + 1,
-                oldName, newName));
-        }
-
-        return edits;
-    }
-
-    private List<GDTextEdit> CollectEditsFromScriptByName(GDScriptFile script, string oldName, string newName)
-    {
-        var edits = new List<GDTextEdit>();
-        var semanticModel = script.SemanticModel;
-        var filePath = script.FullPath;
-
-        if (semanticModel == null || filePath == null)
-            return edits;
-
-        var symbol = semanticModel.FindSymbol(oldName);
-        if (symbol == null)
-            return edits;
-
-        return CollectEditsFromScript(script, symbol, oldName, newName);
     }
 
     private void CollectAllMemberAccessEdits(
@@ -1734,41 +1753,8 @@ public class GDRenameService
         return GDProvenanceTracer.TryNarrowTypeFromChain(_runtimeProvider, chain, currentType);
     }
 
-    private List<GDCallSiteProvenanceEntry> TraceContainerOrigin(
-        GDScriptFile file, string enclosingType,
-        string containerVarName, int maxDepth)
-    {
-        return GDProvenanceTracer.TraceContainerOrigin(
-            _project, _projectModel, _runtimeProvider,
-            file, enclosingType, containerVarName, maxDepth);
-    }
-
-    private string? FindRootDeclaringType(string typeName, string memberName)
-    {
-        if (_runtimeProvider == null)
-            return null;
-
-        var current = typeName;
-        string? root = null;
-        var visited = new HashSet<string>();
-
-        while (!string.IsNullOrEmpty(current) && visited.Add(current))
-        {
-            if (_runtimeProvider.GetMember(current, memberName) != null)
-                root = current;
-            current = _runtimeProvider.GetBaseType(current);
-        }
-
-        return root;
-    }
-
     private IReadOnlyList<string>? GetSignalParameterTypes(string emitterType, string signalName)
         => GDProvenanceTracer.GetSignalParameterTypes(_project, _runtimeProvider, emitterType, signalName);
-
-    /// <summary>
-    /// Type-filtered version: collects .tscn signal connection edits only where
-    /// the target node type is compatible with the declaring type.
-    /// </summary>
 
     #endregion
 }

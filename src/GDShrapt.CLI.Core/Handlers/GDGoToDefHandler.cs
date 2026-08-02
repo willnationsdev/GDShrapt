@@ -21,8 +21,6 @@ public class GDGoToDefHandler : IGDGoToDefHandler
     protected readonly IGDLogger _logger;
     private readonly GDGoToDefinitionService _service = new();
 
-    private static string BuiltInTypesDir => GDBuiltInFileHelper.BuiltInTypesDir;
-
     public GDGoToDefHandler(GDScriptProject project, IGDRuntimeProvider? runtimeProvider = null, IGDLogger? logger = null)
     {
         _project = project;

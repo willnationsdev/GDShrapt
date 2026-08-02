@@ -16,7 +16,6 @@ public partial class GDShraptPlugin : EditorPlugin
     readonly ConditionalWeakTable<object, TabController> _weakTabControllersTable = new ConditionalWeakTable<object, TabController>();
     readonly ConditionalWeakTable<GDScriptFile, TabController> _weakScriptTabControllersTable = new ConditionalWeakTable<GDScriptFile, TabController>();
 
-    readonly HashSet<MenuButton> _injectedButtons = new HashSet<MenuButton>();
 
     private ReferencesDock _referencesDock;
     private Action<string, int, int, int> _referencesDockNavigateHandler;
@@ -262,7 +261,6 @@ public partial class GDShraptPlugin : EditorPlugin
         _configManager = null;
 
         DetachTabControllers();
-        DetachMenuButtons();
         DetachDocks();
         DetachNotificationPanel();
 
@@ -489,9 +487,6 @@ public partial class GDShraptPlugin : EditorPlugin
             // but since EditScript may open a new tab, we defer selection via signal or delay.
             // Line is expected to be 1-based from caller (EditScript uses 1-based lines).
             EditorInterface.Singleton.EditScript(script, line, column);
-
-            // TODO: Implement token selection after EditScript if needed
-            // Currently, EditScript only sets caret position, not selection
         }
     }
 
@@ -629,7 +624,6 @@ public partial class GDShraptPlugin : EditorPlugin
         Logger.Debug($"OnTabSelected: {index}");
         GetOrCreateTabControllerForCurrentTab();
         UpdateCurrentTabScript();
-        UpdateShrapterMenuButton();
     }
 
     private void UpdateCurrentTabScript()
@@ -918,16 +912,6 @@ public partial class GDShraptPlugin : EditorPlugin
         };
     }
 
-    private void DetachMenuButtons()
-    {
-        Logger.Debug("DetachMenuButtons requested");
-
-        foreach (var item in _injectedButtons)
-            item.GetParent()?.RemoveChild(item);
-
-        _injectedButtons.Clear();
-    }
-
     private bool FindTabContainer()
     {
         var editor = EditorInterface.Singleton.GetScriptEditor();
@@ -962,52 +946,6 @@ public partial class GDShraptPlugin : EditorPlugin
         }
 
         return null;
-    }
-
-    private bool UpdateShrapterMenuButton()
-    {
-        var editor = EditorInterface.Singleton.GetScriptEditor();
-
-        if (editor == null)
-            return false;
-
-        if (editor.GetChildCount() < 1)
-            return false;
-
-        var container = editor.GetChild(0); // VBoxContainer
-
-        if (container.GetChildCount() < 1)
-            return false;
-
-        container = container.GetChild(0); // HBoxContainer
-
-        if (container.GetChildCount() < 1)
-            return false;
-
-        Logger.Debug($"Updating menu buttons");
-
-        foreach (var node in container.GetChildren().OfType<HBoxContainer>())
-        {
-            /*var oldButton = node
-               .GetChildren()
-               .OfType<GDShraptMenuButton>()
-               .FirstOrDefault();
-
-            if (oldButton == null)
-            {
-                var newButton = new GDShraptMenuButton(this);
-                _injectedButtons.Add(newButton);
-                node.AddChild(newButton);
-            }
-            else
-            {
-                // Just move existing button to end, don't recreate
-                node.MoveChild(oldButton, node.GetChildCount() - 1);
-            }*/
-
-        }
-
-        return true;
     }
 
     public override string _GetPluginName()

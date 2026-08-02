@@ -25,6 +25,10 @@ public static class GDGodotProjectParser
         @"uid=""(uid://[a-y0-8]+)""",
         RegexOptions.Compiled);
 
+    private static readonly Regex InputActionRegex = new Regex(
+        @"^(\w+)\s*=",
+        RegexOptions.Compiled);
+
     /// <summary>
     /// Parses autoload entries from project.godot file.
     /// </summary>
@@ -138,6 +142,56 @@ public static class GDGodotProjectParser
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Parses input action names from the [input] section of project.godot.
+    /// Each entry in that section (e.g. <c>jump={...}</c>) is an action name.
+    /// </summary>
+    /// <param name="projectGodotPath">Full path to project.godot file.</param>
+    /// <param name="fileSystem">File system abstraction (optional, uses default if null).</param>
+    /// <returns>Set of configured input action names (empty if the file is missing).</returns>
+    public static IReadOnlyCollection<string> ParseInputActions(string projectGodotPath, IGDFileSystem? fileSystem = null, IGDLogger? logger = null)
+    {
+        logger ??= GDNullLogger.Instance;
+        var fs = fileSystem ?? new GDDefaultFileSystem();
+        var actions = new HashSet<string>(StringComparer.Ordinal);
+
+        if (!fs.FileExists(projectGodotPath))
+            return actions;
+
+        try
+        {
+            var content = fs.ReadAllText(projectGodotPath);
+            var lines = content.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+
+            bool inInputSection = false;
+
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.Trim();
+
+                if (line.StartsWith("["))
+                {
+                    inInputSection = line.Equals("[input]", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                if (!inInputSection)
+                    continue;
+
+                // Action entries start a line with "name="; the dict body lines start with a quote.
+                var match = InputActionRegex.Match(line);
+                if (match.Success)
+                    actions.Add(match.Groups[1].Value);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Debug($"Failed to parse input actions from {projectGodotPath}: {ex.Message}");
+        }
+
+        return actions;
     }
 
     private static void ResolveUidPaths(List<GDAutoloadEntry> autoloads, string projectGodotPath, IGDFileSystem fs, IGDLogger logger)

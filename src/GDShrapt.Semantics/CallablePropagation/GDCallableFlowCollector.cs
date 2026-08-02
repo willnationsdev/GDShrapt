@@ -182,7 +182,6 @@ internal class GDCallableFlowCollector : GDVisitor
         else if (callExpr.CallerExpression is GDMemberOperatorExpression memberOp)
         {
             calledMethodName = memberOp.Identifier?.Sequence;
-            // Could extract class from caller, but for now assume same class
         }
 
         if (string.IsNullOrEmpty(calledMethodName))

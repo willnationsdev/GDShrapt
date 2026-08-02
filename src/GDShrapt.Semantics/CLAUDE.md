@@ -12,7 +12,7 @@ Detailed documentation is in folder-level CLAUDE.md files:
 | `Analysis/CrossMethod/` | [Analysis/CrossMethod/CLAUDE.md](Analysis/CrossMethod/CLAUDE.md) | Cross-method flow analysis, @onready safety |
 | `TypeInference/` | [TypeInference/CLAUDE.md](TypeInference/CLAUDE.md) | Type inference engine, providers, caching |
 | `TypeInference/Services/` | [TypeInference/Services/CLAUDE.md](TypeInference/Services/CLAUDE.md) | Type services (Container, Union, Duck, Confidence) |
-| `Refactoring/` | [Refactoring/CLAUDE.md](Refactoring/CLAUDE.md) | 17 refactoring services, Plan vs Execute |
+| `Refactoring/` | [Refactoring/CLAUDE.md](Refactoring/CLAUDE.md) | 20 refactoring services, Plan vs Execute |
 | `SceneFlow/` | — | Scene hierarchy prediction, `GDSceneFlowService`, `CheckNodePath()` |
 | `ResourceFlow/` | — | Resource dependency graph, `GDResourceFlowService` |
 
@@ -123,7 +123,7 @@ Services may access `symbol.DeclarationNode` only for AST visitor traversal (e.g
 TypeInference/GDTypeInferenceEngine.cs   - Core inference
 Analysis/GDSemanticModel.cs              - Single API entry point
 Analysis/GDFlowAnalyzer.cs               - Control flow analysis
-Refactoring/Services/GD*Service.cs       - 17 refactoring services
+Refactoring/Services/GD*Service.cs       - 20 refactoring services
 GDWellKnownTypes.cs                      - Type name constants
 GDWellKnownFunctions.cs                  - Function name constants
 GDTypeCompatibility.cs                   - Implicit conversion rules

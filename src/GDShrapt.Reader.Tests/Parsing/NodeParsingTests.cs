@@ -143,15 +143,11 @@ namespace GDShrapt.Reader.Tests
             AssertHelper.NoInvalidTokens(statement);
         }
 
-        #region Parser Bug: $NodePath as Type
+        #region Node-path as/is cast
 
         /// <summary>
-        /// BUG: Parser incorrectly tokenizes "$Sprite2D as Sprite2D" as a single GDPathSpecifier
-        /// containing "Sprite2D as Sprite2D" instead of parsing it as GDDualOperatorExpression
-        /// with left=$Sprite2D, operator=as, right=Sprite2D.
-        ///
-        /// Expected: GDDualOperatorExpression { Left=GDGetNodeExpression, Op=As, Right=GDIdentifierExpression }
-        /// Actual: GDGetNodeExpression with path containing "Sprite2D as Sprite2D"
+        /// "$Sprite2D as Sprite2D" parses as GDDualOperatorExpression
+        /// { Left=GDGetNodeExpression, Op=As, Right=GDIdentifierExpression }.
         /// </summary>
         [TestMethod]
         public void ParseNode_WithAsCast_ShouldBeDualOperator()
@@ -164,7 +160,6 @@ namespace GDShrapt.Reader.Tests
 
             Assert.IsNotNull(expression);
 
-            // BUG: Currently fails - parser returns GDGetNodeExpression instead of GDDualOperatorExpression
             Assert.IsInstanceOfType(expression, typeof(GDDualOperatorExpression),
                 "Expression '$Sprite2D as Sprite2D' should be parsed as GDDualOperatorExpression, " +
                 $"but got {expression.GetType().Name}");
@@ -189,9 +184,7 @@ namespace GDShrapt.Reader.Tests
         }
 
         /// <summary>
-        /// BUG: Same issue with quoted path syntax: $"Node Path" as Type
-        /// This case is even worse - it crashes the parser with InvalidOperationException
-        /// during priority rebuilding in SwapRight().
+        /// Quoted-path cast: $"Sprite2D" as Type parses as a GDDualOperatorExpression.
         /// </summary>
         [TestMethod]
         public void ParseNode_QuotedPath_WithAsCast_ShouldBeDualOperator()
@@ -200,8 +193,6 @@ namespace GDShrapt.Reader.Tests
 
             var code = "$\"Sprite2D\" as Sprite2D";
 
-            // BUG: Currently throws InvalidOperationException in SwapRight during priority rebuilding
-            // Expected: Should parse without exception and return GDDualOperatorExpression
             var expression = reader.ParseExpression(code);
 
             Assert.IsNotNull(expression);
@@ -226,7 +217,7 @@ namespace GDShrapt.Reader.Tests
         }
 
         /// <summary>
-        /// BUG: With @onready annotation - common real-world pattern
+        /// Common real-world pattern: @onready var x := $Node as Type.
         /// </summary>
         [TestMethod]
         public void ParseNode_OnreadyWithAsCast_ShouldBeDualOperator()
@@ -244,7 +235,6 @@ namespace GDShrapt.Reader.Tests
             Assert.IsNotNull(variable.Initializer,
                 "Variable should have initializer");
 
-            // BUG: Currently fails - initializer is GDGetNodeExpression instead of GDDualOperatorExpression
             Assert.IsInstanceOfType(variable.Initializer, typeof(GDDualOperatorExpression),
                 "Initializer '$Sprite2D as Sprite2D' should be GDDualOperatorExpression, " +
                 $"but got {variable.Initializer.GetType().Name}");
@@ -257,7 +247,7 @@ namespace GDShrapt.Reader.Tests
         }
 
         /// <summary>
-        /// BUG: Quoted path with space: $"Node Path" as Type
+        /// Quoted path containing a space: $"My Sprite" as Type.
         /// </summary>
         [TestMethod]
         public void ParseNode_QuotedPathWithSpace_WithAsCast_ShouldBeDualOperator()
@@ -266,7 +256,6 @@ namespace GDShrapt.Reader.Tests
 
             var code = "$\"My Sprite\" as Sprite2D";
 
-            // BUG: Expected to fail similarly to other $Path as Type cases
             var expression = reader.ParseExpression(code);
 
             Assert.IsNotNull(expression);

@@ -638,7 +638,8 @@ public class GDSymbolReferenceCollector
                             crossRef.Reason,
                             refs[idx].Kind == GDSymbolReferenceKind.Declaration ? GDSymbolReferenceKind.Declaration : kind,
                             isInherited: isInherited,
-                            isOverride: isOverride);
+                            isOverride: isOverride,
+                            sharedTypes: crossRef.SharedTypes);
                     }
                 }
                 continue;
@@ -651,7 +652,8 @@ public class GDSymbolReferenceCollector
                 crossRef.Reason,
                 kind,
                 isInherited: isInherited,
-                isOverride: isOverride));
+                isOverride: isOverride,
+                sharedTypes: crossRef.SharedTypes));
         }
     }
 
@@ -1290,7 +1292,11 @@ public class GDSymbolReferenceCollector
             {
                 if (r.FilePath == null || !r.FilePath.Equals(bridgeFilePath, StringComparison.OrdinalIgnoreCase))
                     continue;
-                if (r.Confidence != GDReferenceConfidence.Potential && r.Confidence != GDReferenceConfidence.NameMatch)
+                // A union reference linking the hierarchies is itself a bridge connection (data-flow
+                // proof that one call site is shared across the hierarchies), as well as duck-typed refs.
+                if (r.Confidence != GDReferenceConfidence.Potential
+                    && r.Confidence != GDReferenceConfidence.NameMatch
+                    && r.Confidence != GDReferenceConfidence.Union)
                     continue;
 
                 var node = r.Node;

@@ -1,16 +1,16 @@
 ================================================================================
 DIAGNOSTICS VERIFICATION REPORT
-Generated: 2026-03-26 06:24:30
+Generated: 2026-06-25 20:56:43
 ================================================================================
 
 SUMMARY
 --------------------------------------------------------------------------------
-Total:           941
-Verified (OK):   934
+Total:           940
+Verified (OK):   933
 Unverified:      5
 False Positives: 0
 Skipped:         2
-Orphaned Markers:0
+Orphaned Markers:1
 
 ================================================================================
 UNVERIFIED DIAGNOSTICS
@@ -34,4 +34,11 @@ SKIPPED (NEEDS ANALYSIS)
 
   test_scripts/polymorphic_interfaces.gd:40:15 [GD7007]
   test_scripts/signal_callback_chains.gd:55:12 [GD7007]
+
+================================================================================
+ORPHANED MARKERS (MARKERS WITHOUT DIAGNOSTICS)
+================================================================================
+
+--- type_guards.gd (1 orphaned) ---
+  # 253:8-GD7007-OK <- No diagnostic at this location
 

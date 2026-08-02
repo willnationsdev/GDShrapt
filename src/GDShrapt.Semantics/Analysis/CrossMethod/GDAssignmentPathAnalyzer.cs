@@ -14,7 +14,6 @@ namespace GDShrapt.Semantics
         // Branch tracking
         private readonly Stack<BranchContext> _branchStack = new();
         private int _branchDepth = 0;
-        private bool _hasElseBranch = false;
         private readonly Stack<bool> _elsePresenceStack = new();
 
         public GDAssignmentPathAnalyzer(IEnumerable<string> classVariables)

@@ -1,211 +1,69 @@
 using GDShrapt.CLI.Core;
-using GDShrapt.Reader;
-using GDShrapt.Semantics;
-using System.Linq;
+using System;
 using System.Threading.Tasks;
 
 namespace GDShrapt.Plugin;
 
 internal class GoToDefinitionCommand : Command
 {
-    private readonly GDGoToDefinitionService _service = new();
-    private readonly IGDSymbolsHandler _symbolsHandler;
-
     public GoToDefinitionCommand(GDShraptPlugin plugin)
         : base(plugin)
     {
-        _symbolsHandler = plugin.ServiceRegistry.GetService<IGDSymbolsHandler>();
     }
 
-    public override async Task Execute(IScriptEditor scriptEditor)
+    public override Task Execute(IScriptEditor scriptEditor)
     {
-        var line = scriptEditor.CursorLine;
-        var column = scriptEditor.CursorColumn;
+        var line = scriptEditor.CursorLine;     // 0-based
+        var column = scriptEditor.CursorColumn; // 0-based
 
         Logger.Info($"GoToDefinition requested {{{line}, {column}}}");
 
-        var @class = scriptEditor.GetClass();
-        if (@class == null)
+        var filePath = scriptEditor.ScriptFile?.FullPath ?? scriptEditor.ScriptPath;
+        if (string.IsNullOrEmpty(filePath))
         {
-            Logger.Info("GoToDefinition cancelled: no class declaration");
             scriptEditor.RequestGodotLookup();
-            return;
+            return Task.CompletedTask;
         }
 
-        // Build refactoring context for semantics service
-        var contextBuilder = new GDPluginRefactoringContextBuilder(Plugin.ScriptProject);
-        var semanticsContext = contextBuilder.BuildSemanticsContext(scriptEditor);
-
-        if (semanticsContext == null)
+        var goToDef = Plugin.ServiceRegistry.GetService<IGDGoToDefHandler>();
+        if (goToDef == null)
         {
-            Logger.Info("GoToDefinition cancelled: could not build refactoring context");
             scriptEditor.RequestGodotLookup();
-            return;
+            return Task.CompletedTask;
         }
 
-        // Use service to resolve definition
-        var result = _service.GoToDefinition(semanticsContext);
+        // Delegate resolution to the shared core handler (same path as CLI/LSP): handles locals,
+        // class members, cross-file types/members, and built-ins.
+        var def = goToDef.FindDefinition(
+            filePath,
+            GDPluginPositionAdapter.ToHandlerLine(line),
+            GDPluginPositionAdapter.ToHandlerColumn(column));
 
-        if (!result.Success)
+        // Built-in / node-path / resource / unresolved → defer to Godot's own lookup.
+        if (def == null || def.IsInfoOnly || string.IsNullOrEmpty(def.FilePath))
         {
-            Logger.Info($"GoToDefinition cancelled: {result.ErrorMessage}");
+            Logger.Info("GoToDefinition: no navigable location, delegating to Godot");
             scriptEditor.RequestGodotLookup();
-            return;
+            return Task.CompletedTask;
         }
 
-        Logger.Info($"GoToDefinition: {result.DefinitionType}, Symbol: {result.SymbolName}");
+        var nameLen = def.SymbolName?.Length ?? 0;
+        var targetLine = GDPluginPositionAdapter.FromLine(def.Line);             // 1-based → 0-based
+        var targetCol = GDPluginPositionAdapter.FromDefinitionColumn(def.Column); // already 0-based
 
-        // Handle results based on type
-        switch (result.DefinitionType)
+        if (string.Equals(def.FilePath, filePath, StringComparison.OrdinalIgnoreCase))
         {
-            case GDDefinitionType.LocalVariable:
-            case GDDefinitionType.MethodParameter:
-            case GDDefinitionType.ForLoopVariable:
-            case GDDefinitionType.ClassMember:
-                // Definition in current file - navigate to it
-                if (result.DeclarationIdentifier != null)
-                {
-                    scriptEditor.SelectToken(result.DeclarationIdentifier);
-                    Logger.Info($"GoToDefinition completed ({result.DefinitionType})");
-                }
-                break;
-
-            case GDDefinitionType.TypeDeclaration:
-            case GDDefinitionType.ExternalType:
-                // Search in project files
-                GoToType(scriptEditor, result.SymbolName);
-                break;
-
-            case GDDefinitionType.ExternalMember:
-                // Need to resolve member in external type
-                GoToExternalMember(scriptEditor, result.SymbolName);
-                break;
-
-            case GDDefinitionType.BuiltInMember:
-                Logger.Info($"GoToDefinition: Built-in member '{result.SymbolName}' of '{result.TypeName}', delegating to Godot");
-                scriptEditor.RequestGodotLookup();
-                break;
-
-            case GDDefinitionType.BuiltInType:
-                // Delegate to Godot for built-in types
-                Logger.Info($"GoToDefinition: Built-in type '{result.TypeName}', delegating to Godot");
-                scriptEditor.RequestGodotLookup();
-                break;
-
-            case GDDefinitionType.NodePath:
-            case GDDefinitionType.ResourcePath:
-                // Delegate to Godot for runtime lookups
-                Logger.Info($"GoToDefinition: {result.DefinitionType} '{result.SymbolName}', delegating to Godot");
-                scriptEditor.RequestGodotLookup();
-                break;
-
-            default:
-                Logger.Info("GoToDefinition: Unknown type, delegating to Godot");
-                scriptEditor.RequestGodotLookup();
-                break;
-        }
-    }
-
-    private void GoToType(IScriptEditor scriptEditor, string typeName)
-    {
-        Logger.Info($"GoToDefinition: Searching in files for type '{typeName}'");
-
-        var pointer = Map.FindStaticDeclarationIdentifier(typeName);
-
-        if (pointer != null && pointer.ScriptReference.FullPath != null)
-        {
-            Logger.Info("GoToDefinition: Pointer found");
-
-            var map = Map.GetScript(pointer.ScriptReference.FullPath);
-            var tabController = Plugin.OpenScript(map);
-
-            if (tabController != null && tabController.Editor != null)
-            {
-                if (pointer.DeclarationIdentifier != null)
-                    tabController.Editor.SelectToken(pointer.DeclarationIdentifier);
-                Logger.Info("GoToDefinition completed (external type)");
-                return;
-            }
-
-            Logger.Info("GoToDefinition: Unable to open script");
+            scriptEditor.Select(targetLine, targetCol, targetLine, targetCol + nameLen);
+            Logger.Info("GoToDefinition completed (same file)");
         }
         else
         {
-            Logger.Info("GoToDefinition: No project declaration found");
-            scriptEditor.RequestGodotLookup();
-        }
-    }
-
-    private void GoToExternalMember(IScriptEditor scriptEditor, string memberName)
-    {
-        Logger.Info($"GoToDefinition: Searching for external member '{memberName}'");
-
-        // Get the identifier at cursor to determine the caller type
-        var @class = scriptEditor.GetClass();
-        if (@class == null)
-        {
-            scriptEditor.RequestGodotLookup();
-            return;
+            var targetScript = Map.GetScript(def.FilePath);
+            var tab = targetScript != null ? Plugin.OpenScript(targetScript) : null;
+            tab?.Editor?.Select(targetLine, targetCol, targetLine, targetCol + nameLen);
+            Logger.Info("GoToDefinition completed (cross-file)");
         }
 
-        var finder = new GDPositionFinder(@class);
-        var token = finder.FindIdentifierAtPosition(scriptEditor.CursorLine, scriptEditor.CursorColumn);
-
-        if (token?.Parent is GDMemberOperatorExpression memberExpr && memberExpr.CallerExpression != null)
-        {
-            var scriptFile = scriptEditor.ScriptFile;
-            if (scriptFile?.FullPath == null)
-            {
-                Logger.Info("GoToDefinition: ScriptFile not available");
-                scriptEditor.RequestGodotLookup();
-                return;
-            }
-
-            var callerType = _symbolsHandler.GetTypeForNode(memberExpr.CallerExpression, scriptFile.FullPath);
-
-            if (string.IsNullOrEmpty(callerType))
-            {
-                Logger.Info("GoToDefinition: Could not determine caller type");
-                scriptEditor.RequestGodotLookup();
-                return;
-            }
-
-            Logger.Info($"GoToDefinition: Caller type is '{callerType}'");
-
-            // Try to find the member in project classes
-            var typeMap = Map.GetScriptByTypeName(callerType);
-
-            if (typeMap?.FullPath != null)
-            {
-                var symbol = _symbolsHandler.FindSymbolByName(memberName, typeMap.FullPath);
-                if (symbol?.DeclarationNode != null)
-                {
-                    // Find the identifier in the declaration
-                    var declIdentifier = symbol.DeclarationNode switch
-                    {
-                        GDMethodDeclaration method => method.Identifier,
-                        GDVariableDeclaration variable => variable.Identifier,
-                        GDSignalDeclaration signal => signal.Identifier,
-                        GDEnumDeclaration enumDecl => enumDecl.Identifier,
-                        _ => null
-                    };
-
-                    if (declIdentifier != null)
-                    {
-                        var tabController = Plugin.OpenScript(typeMap);
-                        if (tabController?.Editor != null)
-                        {
-                            tabController.Editor.SelectToken(declIdentifier);
-                            Logger.Info("GoToDefinition completed (external member)");
-                            return;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fall back to Godot lookup for built-in types
-        Logger.Info("GoToDefinition: Member not found in project, requesting Godot lookup");
-        scriptEditor.RequestGodotLookup();
+        return Task.CompletedTask;
     }
 }

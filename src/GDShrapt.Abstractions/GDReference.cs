@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using GDShrapt.Reader;
 
 namespace GDShrapt.Abstractions;
@@ -52,6 +53,14 @@ public class GDReference
     /// Null for local function calls or variable references.
     /// </summary>
     public string? CallerTypeName { get; set; }
+
+    /// <summary>
+    /// For union references (Confidence == Union): the union member type names this reference
+    /// resolves to (e.g. ["Enemy", "Player"] for x.foo() where x: Enemy|Player). The member is
+    /// declared on each of these types, so the single call site is SHARED across their declarations.
+    /// Null/empty for non-union references.
+    /// </summary>
+    public IReadOnlyList<string>? SharedTypes { get; set; }
 
     /// <summary>
     /// The specific identifier token that this reference points to.

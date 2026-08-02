@@ -76,6 +76,68 @@ public class GDDocumentManager
         }
     }
 
+    /// <summary>
+    /// Applies a sequence of (possibly incremental) content changes to an open document, then reloads.
+    /// A change with a null Range replaces the whole document; otherwise the Range is spliced.
+    /// </summary>
+    public void ApplyChanges(string uri, GDTextDocumentContentChangeEvent[] changes, int version)
+    {
+        if (!_documents.TryGetValue(uri, out var doc))
+            return;
+
+        var content = doc.Content;
+        foreach (var change in changes)
+        {
+            if (change.Range == null)
+            {
+                content = change.Text ?? string.Empty;
+            }
+            else
+            {
+                var start = PositionToOffset(content, change.Range.Start.Line, change.Range.Start.Character);
+                var end = PositionToOffset(content, change.Range.End.Line, change.Range.End.Character);
+                if (end < start)
+                    end = start;
+                content = content.Substring(0, start) + (change.Text ?? string.Empty) + content.Substring(end);
+            }
+        }
+
+        UpdateDocument(uri, content, version);
+    }
+
+    /// <summary>
+    /// Converts an LSP 0-based (line, character) position to a character offset in the content.
+    /// Handles LF and CRLF line endings; clamps gracefully for out-of-range positions.
+    /// </summary>
+    internal static int PositionToOffset(string content, int line, int character)
+    {
+        int i = 0;
+        int currentLine = 0;
+        while (i < content.Length && currentLine < line)
+        {
+            var c = content[i++];
+            if (c == '\n')
+            {
+                currentLine++;
+            }
+            else if (c == '\r')
+            {
+                currentLine++;
+                if (i < content.Length && content[i] == '\n')
+                    i++;
+            }
+        }
+
+        var col = 0;
+        while (i < content.Length && col < character && content[i] != '\n' && content[i] != '\r')
+        {
+            i++;
+            col++;
+        }
+
+        return i;
+    }
+
     private void InvalidateSemanticModel(GDScriptFile script)
     {
         if (script.Class == null)

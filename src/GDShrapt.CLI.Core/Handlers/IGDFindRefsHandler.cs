@@ -223,4 +223,11 @@ public class GDCliReferenceLocation
     /// Receiver type name for signal connections (e.g. "EnemyTank" for timeout.connect()).
     /// </summary>
     public string? ReceiverTypeName { get; init; }
+
+    /// <summary>
+    /// For union/shared references (Confidence == Union): the union member type names this
+    /// reference is shared across (e.g. ["Enemy", "Player"]). Null for non-union references.
+    /// Lets consumers present "Shared (Enemy|Player)" references.
+    /// </summary>
+    public System.Collections.Generic.IReadOnlyList<string>? SharedTypes { get; init; }
 }

@@ -146,8 +146,7 @@ internal partial class QuickActionsPopup : PopupMenu
 
     private Texture2D GetCategoryIcon(GDRefactoringCategory category)
     {
-        // Return null for now - icons can be added later
-        // Could use EditorInterface.GetEditorTheme() to get themed icons
+        // Category icons are not themed; the popup renders text-only entries.
         return null;
     }
 

@@ -302,12 +302,9 @@ public class GDTypeCoverageService
     {
         public bool HasValueReturn { get; private set; }
         public bool AllReturnsTyped { get; private set; } = true;
-        private bool _hasAnyReturn = false;
 
         public override void Visit(GDReturnExpression returnExpr)
         {
-            _hasAnyReturn = true;
-
             if (returnExpr.Expression != null)
             {
                 HasValueReturn = true;

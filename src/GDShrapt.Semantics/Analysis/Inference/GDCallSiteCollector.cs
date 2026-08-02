@@ -302,8 +302,7 @@ internal class GDCallSiteCollector
                 }
             }
 
-            // For "call", args[1..] are the method arguments
-            // For "callv", args[1] is an Array of arguments (harder to analyze, skip for now)
+            // For "call", args[1..] are the method arguments; "callv" passes them as a single Array.
             if (methodName == "callv")
                 return null;
 

@@ -1228,12 +1228,6 @@ namespace GDShrapt.Semantics.Validator
             return false;
         }
 
-        private static bool IsNumericTypeStatic(string type) =>
-            type == "int" || type == "float";
-
-        private static bool IsStringType(string type) =>
-            type == "String" || type == "StringName";
-
         private static bool AreVectorTypesComparable(string left, string right)
         {
             // Vector2/Vector2i, Vector3/Vector3i, Vector4/Vector4i
@@ -1538,11 +1532,6 @@ namespace GDShrapt.Semantics.Validator
             var rightTypeNode = _semanticModel?.TypeSystem.GetTypeNode(right);
 
             return leftTypeNode is GDArrayTypeNode && rightTypeNode is GDArrayTypeNode;
-        }
-
-        private bool IsNumericType(string type)
-        {
-            return type == "int" || type == "float";
         }
 
         private static bool IsVectorType(string type)

@@ -239,15 +239,6 @@ public class GDFormattingOptions
 }
 
 /// <summary>
-/// Custom request parameters for gdshrapt/unionReferences.
-/// </summary>
-public class GDUnionReferencesParams
-{
-    [JsonPropertyName("symbolName")]
-    public string SymbolName { get; set; } = string.Empty;
-}
-
-/// <summary>
 /// Custom request parameters for gdshrapt/codeLensReferences.
 /// </summary>
 public class GDCodeLensReferencesParams

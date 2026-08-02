@@ -21,7 +21,7 @@ internal partial class TabController : GodotObject
     QuickFixesPopup? _quickFixesPopup;
     GDPluginRefactoringContextBuilder? _contextBuilder;
     GDCompletionPopup? _completionPopup;
-    GDCompletionService? _completionService;
+    GDShrapt.CLI.Core.IGDCompletionHandler? _completionHandler;
     GDCompletionContextBuilder? _completionContextBuilder;
 
     public Script? ControlledScript => _script;
@@ -356,12 +356,12 @@ internal partial class TabController : GodotObject
         if (ScriptFile == null)
             return;
 
-        // Initialize completion service if needed
+        // Initialize completion handler if needed
         EnsureGDCompletionServiceInitialized();
-        if (_completionService == null || _completionContextBuilder == null)
+        if (_completionHandler == null || _completionContextBuilder == null)
             return;
 
-        // Build completion context
+        // Build completion context (editor-side detection of cursor context from the live buffer)
         var sourceCode = _textEdit.Text;
         var cursorLine = _textEdit.GetCaretLine();
         var cursorCol = _textEdit.GetCaretColumn();
@@ -381,8 +381,22 @@ internal partial class TabController : GodotObject
             return;
         }
 
-        // Get completions
-        var completions = _completionService.GetCompletions(context);
+        // Delegate completion content to the core handler (single source of truth), then render.
+        var request = new GDShrapt.CLI.Core.GDCompletionRequest
+        {
+            FilePath = ScriptFile.FullPath ?? _script.ResourcePath,
+            Line = GDPluginPositionAdapter.ToHandlerLine(context.Line),
+            Column = GDPluginPositionAdapter.ToHandlerColumn(context.Column),
+            TextBeforeCursor = context.TextBeforeCursor,
+            WordPrefix = context.WordPrefix,
+            CompletionType = GDCompletionItemConverter.ToCoreType(context.GDCompletionType),
+            MemberAccessExpression = context.MemberAccessExpression,
+            MemberAccessType = context.MemberAccessType,
+        };
+
+        var completions = _completionHandler.GetCompletions(request)
+            .Select(GDCompletionItemConverter.ToPluginItem)
+            .ToList();
         if (completions.Count == 0)
         {
             Logger.Debug("TabController: No completions available");
@@ -414,7 +428,7 @@ internal partial class TabController : GodotObject
 
     private void EnsureGDCompletionServiceInitialized()
     {
-        if (_completionService != null && _completionContextBuilder != null)
+        if (_completionHandler != null && _completionContextBuilder != null)
             return;
 
         var typeResolver = _plugin.TypeResolver;
@@ -424,11 +438,10 @@ internal partial class TabController : GodotObject
             return;
         }
 
-        var symbolsHandler = _plugin.ServiceRegistry.GetService<IGDSymbolsHandler>();
-        _completionService = new GDCompletionService(_plugin.ScriptProject, typeResolver, symbolsHandler);
+        _completionHandler = _plugin.ServiceRegistry.GetService<GDShrapt.CLI.Core.IGDCompletionHandler>();
         _completionContextBuilder = new GDCompletionContextBuilder(_plugin.ScriptProject, typeResolver);
 
-        Logger.Info("TabController: Completion service initialized");
+        Logger.Info("TabController: Completion handler initialized");
     }
 
     private void OnGDCompletionItemSelected(GDCompletionItem item)
@@ -1023,7 +1036,7 @@ internal partial class TabController : GodotObject
             _completionPopup = null;
         }
 
-        _completionService = null;
+        _completionHandler = null;
         _completionContextBuilder = null;
     }
 

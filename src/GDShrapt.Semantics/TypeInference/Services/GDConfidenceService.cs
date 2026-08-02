@@ -98,6 +98,21 @@ internal class GDConfidenceService
                         return GDReferenceConfidence.Strict;
                 }
 
+                // Flow-level union: a genuine data-flow union (branch-merge, call-site parameter) resolves
+                // member confidence by presence across its members — member on all → Strict, some → Potential.
+                // Maps to Strict/Potential only (never the Union enum), so validation switches stay correct;
+                // "member on none" falls through to the existing checks (→ NameMatch).
+                if (flowType.CurrentType.IsUnion)
+                {
+                    var unionMember = memberAccess.Identifier?.Sequence;
+                    if (!string.IsNullOrEmpty(unionMember))
+                    {
+                        var flowUnionConfidence = _unionTypeService.GetUnionMemberConfidence(flowType.CurrentType, unionMember);
+                        if (flowUnionConfidence == GDReferenceConfidence.Strict || flowUnionConfidence == GDReferenceConfidence.Potential)
+                            return flowUnionConfidence;
+                    }
+                }
+
                 if (flowType.DuckType != null && flowType.DuckType.HasRequirements)
                 {
                     var memberName = memberAccess.Identifier?.Sequence;

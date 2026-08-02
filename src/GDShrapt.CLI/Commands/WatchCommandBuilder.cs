@@ -17,7 +17,7 @@ public static class WatchCommandBuilder
         Option<string?> logLevelOption)
     {
         var command = new Command("watch",
-            "[Experimental] Watch for file changes and report diagnostics in real-time.\n\n" +
+            "Watch for file changes and report diagnostics in real-time.\n\n" +
             "Examples:\n" +
             "  gdshrapt watch                           Watch current directory\n" +
             "  gdshrapt watch ./my-project              Watch specific project\n" +

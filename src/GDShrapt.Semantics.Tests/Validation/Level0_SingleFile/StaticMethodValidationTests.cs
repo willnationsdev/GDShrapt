@@ -189,11 +189,33 @@ func test():
             "new() on class name should not produce warnings");
     }
 
+    [TestMethod]
+    public void StaticMethodCall_OnInstance_WithOptionEnabled_ReportsGD9002()
+    {
+        // GDScript allows this, so GD9002 is opt-in (off by default).
+        var code = @"
+class_name TestScript
+
+class MyHelper:
+    static func compute(x: int) -> int:
+        return x * 2
+
+func test():
+    var helper = MyHelper.new()
+    var result = helper.compute(10)
+";
+        var diagnostics = ValidateCode(code, checkStaticInstanceCalls: true);
+
+        diagnostics.Where(d => d.Code == GDDiagnosticCode.StaticMethodCalledOnInstance)
+            .Should().NotBeEmpty(
+                "calling a static method on an instance should report GD9002 when the option is enabled");
+    }
+
     #endregion
 
     #region Helper Methods
 
-    private static IEnumerable<GDDiagnostic> ValidateCode(string code)
+    private static IEnumerable<GDDiagnostic> ValidateCode(string code, bool checkStaticInstanceCalls = false)
     {
         var reader = new GDScriptReader();
         var classDecl = reader.ParseFileContent(code);
@@ -217,7 +239,8 @@ func test():
         {
             CheckTypes = true,
             CheckMemberAccess = true,
-            CheckArgumentTypes = true
+            CheckArgumentTypes = true,
+            CheckStaticInstanceCalls = checkStaticInstanceCalls
         };
         var validator = new GDSemanticValidator(semanticModel, options);
         var result = validator.Validate(classDecl);

@@ -101,7 +101,8 @@ var command = new Command("watch", "[Experimental] Watch for file changes...");
 var opt = new Option<bool>("--incremental", "[Experimental] Only analyze changed files...");
 ```
 
-**Experimental features:** `watch` command.
+**Experimental features:** none in Base CLI (the `watch` command graduated to stable in 6.0.0-alpha.7).
+Pro adds experimental options (e.g. `--incremental`) in `GDShrapt.Pro.CLI`.
 
 ## Potential References Messaging (Rename)
 
@@ -119,21 +120,25 @@ Never use "Use GDShrapt Pro" or "[Pro only]" in Base CLI output.
 
 ## Position Conventions
 
-CLI.Core uses **1-based** line and column numbers in all output (matching user expectations).
-The AST and SemanticModel use **0-based** positions internally.
+Input positions to handlers are **1-based** line and column. The AST and SemanticModel use
+**0-based** positions internally; handlers convert at the boundary (`inputLine - 1`, etc.).
 
-Handlers convert at the boundary:
-```csharp
-// Output: AST 0-based → CLI 1-based
-outputLine = node.Line + 1;
-outputColumn = node.Column + 1;
+**Output `Line` is 1-based for all DTOs. Output `Column` is NOT uniform** — it differs per DTO
+today (a known, non-user-visible inconsistency: each LSP/Plugin consumer compensates):
 
-// Input: CLI 1-based → AST 0-based (when receiving positions from LSP/Plugin)
-astLine = inputLine - 1;
-astColumn = inputColumn - 1;
-```
+| Output DTO | Line | Column |
+|------------|------|--------|
+| `GDCliReferenceLocation` (find-refs) | 1-based | **1-based** |
+| `GDDefinitionLocation` (go-to-def / type-def / impl) | 1-based | **0-based** |
+| Inlay hints / document symbols / rename edits / code lens | 1-based | 1-based |
+| Diagnostics (`GDUnifiedDiagnostic`) & semantic tokens | 1-based line / 0-based col (AST-aligned; shared with the `# LINE:COL` marker system) | — |
 
-See `Analysis/CLAUDE.md` for the full position convention table.
+This contract is pinned by `GDShrapt.CLI.Tests/Handlers/GDPositionContractTests.cs`. A planned
+normalization to uniform 1-based columns is **deferred** — it is cross-cutting (LSP + Plugin +
+tests) and cosmetic (outputs are correct today). Any such change must update that test and review
+every consumer in the same commit.
+
+See `Analysis/CLAUDE.md` for the AST/SemanticModel/LSP/Plugin position table.
 
 ## Known Limitations
 

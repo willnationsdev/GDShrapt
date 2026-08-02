@@ -18,6 +18,39 @@ public class GDGodotProjectParserTests
     }
 
     [TestMethod]
+    public void ParseInputActions_InputSection_ExtractsActionNames()
+    {
+        var content = @"[input]
+
+jump={
+""deadzone"": 0.5,
+""events"": [Object(InputEventKey)]
+}
+move_left={
+""deadzone"": 0.5,
+""events"": []
+}
+";
+        var mockFs = new MockFileSystem();
+        mockFs.SetFileContent("/project.godot", content);
+
+        var actions = GDGodotProjectParser.ParseInputActions("/project.godot", mockFs);
+
+        actions.Should().BeEquivalentTo(new[] { "jump", "move_left" });
+    }
+
+    [TestMethod]
+    public void ParseInputActions_NoInputSection_ReturnsEmpty()
+    {
+        var mockFs = new MockFileSystem();
+        mockFs.SetFileContent("/project.godot", "[autoload]\nGlobal=\"*res://g.gd\"");
+
+        var actions = GDGodotProjectParser.ParseInputActions("/project.godot", mockFs);
+
+        actions.Should().BeEmpty();
+    }
+
+    [TestMethod]
     public void ParseAutoloads_NoAutoloadSection_ReturnsEmptyList()
     {
         var content = @"[application]

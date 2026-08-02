@@ -76,11 +76,21 @@ namespace GDShrapt.Reader.Tests
                 "BuildName for named type should return the type name");
         }
 
-        // Note: This test is skipped because parsing `extends ""` (empty string)
-        // causes a host process crash in the test runner. This is an edge case
-        // that's unlikely to occur in real code.
-        // [TestMethod]
-        // public void PathExtends_EmptyString_BuildName_ReturnsEmptyString() { ... }
+        [TestMethod]
+        public void PathExtends_EmptyString_BuildName_ReturnsEmptyString()
+        {
+            var code = "extends \"\"";
+            var reader = new GDScriptReader();
+            var classDecl = reader.ParseFileContent(code);
+
+            var extendsType = classDecl.Extends?.Type;
+            extendsType.Should().NotBeNull("extends clause should have a type");
+
+            var buildName = extendsType.BuildName();
+            buildName.Should().Be("", "empty extends path should build to an empty string");
+
+            classDecl.ToString().Should().Be(code, "empty extends should round-trip losslessly");
+        }
 
         [TestMethod]
         public void PathExtends_RelativePath_BuildName_ReturnsPath()

@@ -167,6 +167,12 @@ public class GDReferenceInfo
     public bool IsSceneSignal { get; set; }
     public string? ReceiverTypeName { get; set; }
 
+    /// <summary>
+    /// For union/shared references: the union member type names this reference is shared across
+    /// (e.g. ["Enemy", "Player"]). Null for non-union references. Rendered as "shared: Enemy|Player".
+    /// </summary>
+    public IReadOnlyList<string>? SharedTypes { get; set; }
+
     // Provenance fields (populated from rename planner)
     public string? PromotionLabel { get; set; }
     public List<string>? PromotionProofParts { get; set; }

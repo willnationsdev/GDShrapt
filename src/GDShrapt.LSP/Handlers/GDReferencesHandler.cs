@@ -27,26 +27,20 @@ public class GDReferencesHandler
     {
         var filePath = GDDocumentManager.UriToPath(@params.TextDocument.Uri);
 
-        // Convert LSP 0-based to CLI.Core 1-based
-        var line = @params.Position.Line + 1;
-        var column = @params.Position.Character + 1;
-
-        // First, get the symbol name at the cursor position
-        var definition = _goToDefHandler.FindDefinition(filePath, line, column);
-        if (definition == null || string.IsNullOrEmpty(definition.SymbolName))
+        // Resolve the symbol at the cursor (shared with rename; identical to the CLI path)
+        var symbolName = GDLspCursorSymbol.ResolveName(_goToDefHandler, filePath, @params.Position);
+        if (symbolName == null)
             return Task.FromResult<GDLspLocation[]?>(null);
-
-        var symbolName = definition.SymbolName;
 
         // Delegate to CLI.Core handler
         var groups = _findRefsHandler.FindReferences(symbolName, filePath);
         if (groups == null || groups.Count == 0)
             return Task.FromResult<GDLspLocation[]?>(null);
 
-        // Flatten groups (including nested overrides) into a single list
-        // Filter to Strict and Union confidence (null = declaration-based, Strict = type-resolved, Union = proven union member)
-        var allRefs = FlattenLocations(groups)
-            .Where(r => r.Confidence == null || r.Confidence == GDReferenceConfidence.Strict || r.Confidence == GDReferenceConfidence.Union);
+        // Flatten groups (including nested overrides) into a single list.
+        // Reads return the SAME set as the CLI find-refs handler (including potential/duck-typed
+        // references) so CLI and LSP are identical. Write operations (rename) stay strict-only.
+        IEnumerable<CLI.Core.GDCliReferenceLocation> allRefs = FlattenLocations(groups);
 
         // Filter results based on IncludeDeclaration
         if (!@params.Context.IncludeDeclaration)

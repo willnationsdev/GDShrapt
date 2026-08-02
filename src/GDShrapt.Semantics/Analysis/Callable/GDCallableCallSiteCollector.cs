@@ -120,8 +120,6 @@ internal class GDCallableCallSiteCollector : GDVisitor
             }
             else if (definitions.Count > 1)
             {
-                // Multiple possible definitions - pick the first for now
-                // In the future, could use flow analysis to narrow down
                 callSite.ResolvedDefinition = definitions[0];
             }
         }

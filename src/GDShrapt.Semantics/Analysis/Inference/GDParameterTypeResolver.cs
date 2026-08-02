@@ -437,25 +437,6 @@ internal class GDParameterTypeResolver
     }
 
     /// <summary>
-    /// Formats a type using per-type constraints if available, falling back to global constraints.
-    /// This ensures Dictionary gets its specific key types and Array gets its specific element types.
-    /// </summary>
-    private string FormatTypeWithPerTypeConstraints(string baseType, GDParameterConstraints? constraints)
-    {
-        if (constraints == null)
-            return baseType;
-
-        var semanticKey = constraints.TypeConstraints.Keys.FirstOrDefault(k => k.IsType(baseType));
-        if (semanticKey != null && constraints.TypeConstraints.TryGetValue(semanticKey, out var typeSpecific))
-        {
-            return typeSpecific.FormatFullType();
-        }
-
-        // Fall back to global constraints (legacy behavior)
-        return FormatTypeWithElements(baseType, constraints);
-    }
-
-    /// <summary>
     /// Formats a container type with element/key types if available from constraints.
     /// E.g., "Array" -> "Array[int | String]", "Dictionary" -> "Dictionary[String, Variant]"
     /// </summary>

@@ -130,8 +130,6 @@ public class GDMetricsService
         };
     }
 
-    private int startToken => 0; // Workaround for the ?? chain
-
     /// <summary>
     /// Calculates cyclomatic complexity.
     /// Each decision point (if, elif, while, for, and, or, ternary) adds 1.

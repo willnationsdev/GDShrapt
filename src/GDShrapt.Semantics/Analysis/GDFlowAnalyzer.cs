@@ -67,21 +67,6 @@ internal class GDFlowAnalyzer : GDVisitor
         _onreadyVariablesProvider = onreadyVariablesProvider;
     }
 
-    [System.Obsolete("Use IGDExpressionTypeProvider overload instead.")]
-    public GDFlowAnalyzer(GDTypeInferenceEngine? typeEngine)
-        : this((IGDExpressionTypeProvider?)typeEngine)
-    {
-    }
-
-    [System.Obsolete("Use IGDExpressionTypeProvider overload instead.")]
-    public GDFlowAnalyzer(
-        GDTypeInferenceEngine? typeEngine,
-        Func<GDExpression, string?>? expressionTypeProvider,
-        Func<IEnumerable<string>>? onreadyVariablesProvider)
-        : this((IGDExpressionTypeProvider?)typeEngine, onreadyVariablesProvider)
-    {
-    }
-
     /// <summary>
     /// Sets the file path for origin tracking.
     /// </summary>
@@ -381,6 +366,15 @@ internal class GDFlowAnalyzer : GDVisitor
         if (exprStmt.Expression is GDCallExpression call)
         {
             TryTrackMutationFromCall(call);
+
+            // assert(cond) holds for all subsequent statements — narrow the linear flow state
+            // exactly as 'if cond:' would narrow its branch.
+            if (GetPlainCallName(call) == "assert")
+            {
+                var assertArgs = call.Parameters?.ToList();
+                if (assertArgs != null && assertArgs.Count > 0)
+                    ApplyNarrowingFromCondition(assertArgs[0], _currentState);
+            }
         }
     }
 
@@ -582,6 +576,14 @@ internal class GDFlowAnalyzer : GDVisitor
     {
         if (call.CallerExpression is GDMemberOperatorExpression memberExpr)
             return memberExpr.Identifier?.Sequence;
+        return null;
+    }
+
+    // Name of a plain (non-member) call: assert(...), typeof(...), etc.
+    private static string? GetPlainCallName(GDCallExpression call)
+    {
+        if (call.CallerExpression is GDIdentifierExpression idExpr)
+            return idExpr.Identifier?.Sequence;
         return null;
     }
 
@@ -1427,6 +1429,7 @@ internal class GDFlowAnalyzer : GDVisitor
                 if (opType == GDDualOperatorType.Equal)
                 {
                     GDFlowNarrowingHelper.ApplyLiteralComparisonNarrowing(eqOp, state);
+                    ApplyTypeOfNarrowing(eqOp, state);
                 }
             }
 
@@ -1465,6 +1468,77 @@ internal class GDFlowAnalyzer : GDVisitor
             }
         }
     }
+
+    // Handle: typeof(x) == TYPE_INT  (and the reversed TYPE_INT == typeof(x)) → narrow x.
+    private void ApplyTypeOfNarrowing(GDDualOperatorExpression eqOp, GDFlowState state)
+    {
+        var call = MatchTypeOfCall(eqOp.LeftExpression, eqOp.RightExpression, out var constName)
+                ?? MatchTypeOfCall(eqOp.RightExpression, eqOp.LeftExpression, out constName);
+        if (call == null || string.IsNullOrEmpty(constName))
+            return;
+
+        var args = call.Parameters?.ToList();
+        if (args == null || args.Count == 0)
+            return;
+
+        var varName = GetIdentifierName(args[0]);
+        var typeName = MapTypeConstantToTypeName(constName!);
+        if (string.IsNullOrEmpty(varName) || string.IsNullOrEmpty(typeName))
+            return;
+
+        var narrowed = GDSemanticType.FromRuntimeTypeName(typeName);
+        var constraint = new GDNarrowingConstraint(GDNarrowingKind.TypeOfCheck, narrowed, LocationFromNode(eqOp));
+        state.NarrowType(varName, narrowed, constraint);
+        state.MarkNonNull(varName);
+    }
+
+    private static GDCallExpression? MatchTypeOfCall(GDExpression? typeofSide, GDExpression? constSide, out string? constName)
+    {
+        constName = null;
+        if (typeofSide is GDCallExpression call && GetPlainCallName(call) == "typeof"
+            && constSide is GDIdentifierExpression constId)
+        {
+            constName = constId.Identifier?.Sequence;
+            return call;
+        }
+        return null;
+    }
+
+    private static string? MapTypeConstantToTypeName(string typeConstant) => typeConstant switch
+    {
+        "TYPE_BOOL" => "bool",
+        "TYPE_INT" => "int",
+        "TYPE_FLOAT" => "float",
+        "TYPE_STRING" => "String",
+        "TYPE_STRING_NAME" => "StringName",
+        "TYPE_NODE_PATH" => "NodePath",
+        "TYPE_VECTOR2" => "Vector2",
+        "TYPE_VECTOR2I" => "Vector2i",
+        "TYPE_VECTOR3" => "Vector3",
+        "TYPE_VECTOR3I" => "Vector3i",
+        "TYPE_VECTOR4" => "Vector4",
+        "TYPE_VECTOR4I" => "Vector4i",
+        "TYPE_COLOR" => "Color",
+        "TYPE_RECT2" => "Rect2",
+        "TYPE_TRANSFORM2D" => "Transform2D",
+        "TYPE_TRANSFORM3D" => "Transform3D",
+        "TYPE_ARRAY" => "Array",
+        "TYPE_DICTIONARY" => "Dictionary",
+        "TYPE_OBJECT" => "Object",
+        "TYPE_CALLABLE" => "Callable",
+        "TYPE_SIGNAL" => "Signal",
+        "TYPE_RID" => "RID",
+        "TYPE_PACKED_BYTE_ARRAY" => "PackedByteArray",
+        "TYPE_PACKED_INT32_ARRAY" => "PackedInt32Array",
+        "TYPE_PACKED_INT64_ARRAY" => "PackedInt64Array",
+        "TYPE_PACKED_FLOAT32_ARRAY" => "PackedFloat32Array",
+        "TYPE_PACKED_FLOAT64_ARRAY" => "PackedFloat64Array",
+        "TYPE_PACKED_STRING_ARRAY" => "PackedStringArray",
+        "TYPE_PACKED_VECTOR2_ARRAY" => "PackedVector2Array",
+        "TYPE_PACKED_VECTOR3_ARRAY" => "PackedVector3Array",
+        "TYPE_PACKED_COLOR_ARRAY" => "PackedColorArray",
+        _ => null
+    };
 
     /// <summary>
     /// Applies negated narrowing from a condition (used for else branches and after early-return guards).
@@ -1591,42 +1665,6 @@ internal class GDFlowAnalyzer : GDVisitor
             return rightIdent.Identifier?.Sequence;
 
         return null;
-    }
-
-    /// <summary>
-    /// Applies literal comparison narrowing.
-    /// x == 42 -> x is narrowed to int
-    /// x == "hello" -> x is narrowed to String
-    /// </summary>
-    private void ApplyLiteralComparisonNarrowing(GDDualOperatorExpression eqOp, GDFlowState state)
-    {
-        string? varName = null;
-        string? literalType = null;
-
-        // variable == literal
-        if (eqOp.LeftExpression is GDIdentifierExpression leftIdent &&
-            GDLiteralTypeResolver.IsLiteralExpression(eqOp.RightExpression))
-        {
-            varName = leftIdent.Identifier?.Sequence;
-            literalType = GDLiteralTypeResolver.GetLiteralType(eqOp.RightExpression);
-        }
-        // literal == variable
-        else if (eqOp.RightExpression is GDIdentifierExpression rightIdent &&
-                 GDLiteralTypeResolver.IsLiteralExpression(eqOp.LeftExpression))
-        {
-            varName = rightIdent.Identifier?.Sequence;
-            literalType = GDLiteralTypeResolver.GetLiteralType(eqOp.LeftExpression);
-        }
-
-        if (!string.IsNullOrEmpty(varName) && !string.IsNullOrEmpty(literalType))
-        {
-            // Null comparison is already handled by ApplyNullComparisonNarrowing
-            if (GDSemanticType.FromRuntimeTypeName(literalType).IsNull)
-                return;
-
-            state.NarrowType(varName, GDSemanticType.FromRuntimeTypeName(literalType));
-            state.MarkNonNull(varName);
-        }
     }
 
     /// <summary>
@@ -1851,10 +1889,6 @@ internal class GDFlowAnalyzer : GDVisitor
         return commonKeyType;
     }
 
-    /// <summary>
-    /// Extracts element/key type from a type name.
-    /// Array[int] -> int, Dictionary[String, int] -> String, String -> String
-    /// </summary>
     private bool IsNumericType(string? type) =>
         !string.IsNullOrEmpty(type) && (_typeProvider?.IsNumericType(type) ?? GDWellKnownTypes.IsNumericType(type));
 
@@ -2008,22 +2042,6 @@ internal class GDFlowAnalyzer : GDVisitor
 
         public bool Equals(GDNode? x, GDNode? y) => ReferenceEquals(x, y);
         public int GetHashCode(GDNode obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
-    }
-
-    /// <summary>
-    /// Finds the statement order for a node by walking up to find a recorded parent.
-    /// </summary>
-    private int FindStatementOrder(GDNode location)
-    {
-        var node = location;
-        while (node != null)
-        {
-            if (_statementOrder.TryGetValue(node, out var order))
-                return order;
-            node = node.Parent as GDNode;
-        }
-        // If no order found, return max to get the final state
-        return int.MaxValue;
     }
 
     /// <summary>

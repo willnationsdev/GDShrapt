@@ -4,13 +4,19 @@ using GDShrapt.CLI.Core;
 
 namespace GDShrapt.LSP;
 
+/// <summary>
+/// Handles textDocument/prepareRename requests.
+/// Thin wrapper over IGDRenameHandler from CLI.Core: returns the range of the identifier
+/// token under the cursor (not the raw cursor position), so the rename box highlights the
+/// whole symbol regardless of where inside it the cursor sits.
+/// </summary>
 public class GDLspPrepareRenameHandler
 {
-    private readonly IGDGoToDefHandler _goToDefHandler;
+    private readonly IGDRenameHandler _renameHandler;
 
-    public GDLspPrepareRenameHandler(IGDGoToDefHandler goToDefHandler)
+    public GDLspPrepareRenameHandler(IGDRenameHandler renameHandler)
     {
-        _goToDefHandler = goToDefHandler;
+        _renameHandler = renameHandler;
     }
 
     public Task<GDPrepareRenameResult?> HandleAsync(GDPrepareRenameParams @params, CancellationToken cancellationToken)
@@ -21,23 +27,21 @@ public class GDLspPrepareRenameHandler
         var line = @params.Position.Line + 1;
         var column = @params.Position.Character + 1;
 
-        var definition = _goToDefHandler.FindDefinition(filePath, line, column);
-        if (definition == null || string.IsNullOrEmpty(definition.SymbolName))
+        var range = _renameHandler.GetRenameRange(filePath, line, column);
+        if (range == null || string.IsNullOrEmpty(range.Placeholder))
             return Task.FromResult<GDPrepareRenameResult?>(null);
 
-        var symbolName = definition.SymbolName;
-
-        // Build range for the symbol at the cursor position
-        var range = GDLocationAdapter.ToLspRange(
-            line,                              // 1-based line
-            column - 1,                        // Convert 1-based column back to 0-based for range start
-            line,
-            column - 1 + symbolName.Length);
+        var col0 = range.Column - 1;
+        var lspRange = GDLocationAdapter.ToLspRange(
+            range.Line,
+            col0,
+            range.Line,
+            col0 + range.Placeholder.Length);
 
         return Task.FromResult<GDPrepareRenameResult?>(new GDPrepareRenameResult
         {
-            Range = range,
-            Placeholder = symbolName
+            Range = lspRange,
+            Placeholder = range.Placeholder
         });
     }
 }

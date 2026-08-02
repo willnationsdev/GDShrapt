@@ -305,7 +305,10 @@ public class GDTextFormatter : IGDOutputFormatter
             marker = "[call]";
 
         var reason = !string.IsNullOrEmpty(reference.Reason) ? $" {reference.Reason}" : "";
-        output.WriteLine($"{indent}{FormatPosition(reference)} {marker}{reason}");
+        var shared = reference.SharedTypes is { Count: > 0 }
+            ? $" shared: {string.Join("|", reference.SharedTypes)}"
+            : "";
+        output.WriteLine($"{indent}{FormatPosition(reference)} {marker}{reason}{shared}");
 
         if (!string.IsNullOrEmpty(reference.Context))
         {

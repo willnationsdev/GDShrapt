@@ -7,7 +7,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <RootNamespace>GDShrapt.Semantics</RootNamespace>
     <AssemblyName>GDShrapt.Semantics</AssemblyName>
-    <Version>6.0.0</Version>
     <Description>Godot-independent semantic analysis library for GDScript</Description>
   </PropertyGroup>
 

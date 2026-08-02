@@ -15994,7 +15994,7 @@ test_scripts/type_guards.gd
 251:29 GDStringExpression "Expected D..." -> String
 253:1 GDReturnExpression return value.keys() -> Variant
 253:8 GDCallExpression value.keys() -> Array
-253:8 GDMemberOperatorExpression value.keys -> Variant
+253:8 GDMemberOperatorExpression value.keys -> Array
 253:8 GDIdentifierExpression value -> Variant
 256:0 Method ternary_with_guard -> float
 256:24 Parameter value -> Quaternion|String|StringName|Vector2|Vector2i|Vector3|Vector3i|Vector4|Vector4i
@@ -18003,7 +18003,7 @@ test_scripts/validation_edge_cases.gd
 59:1 Variable sn -> StringName
 59:22 GDStringExpression "test" -> String
 60:1 Variable sn2 -> StringName
-60:23 GDStringNameExpression &test -> Variant
+60:23 GDStringNameExpression &test -> StringName
 62:1 Variable s -> String
 62:17 GDIdentifierExpression sn -> StringName
 65:1 Variable name -> StringName

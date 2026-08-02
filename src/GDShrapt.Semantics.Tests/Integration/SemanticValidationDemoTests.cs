@@ -85,12 +85,8 @@ public class SemanticValidationDemoTests
             Console.WriteLine($"  Line {d.StartLine}: {d.Message}");
         }
 
-        // Note: This may be 0 if GDIndexerValidator is not yet fully implemented
-        // The test documents expected behavior
-        if (indexerDiagnostics.Count == 0)
-        {
-            Console.WriteLine("NOTE: GD3013 not yet implemented in GDSemanticValidator");
-        }
+        Assert.IsTrue(indexerDiagnostics.Count > 0,
+            "GD3013 IndexerKeyTypeMismatch should be produced for the demo cases");
     }
 
     [TestMethod]
@@ -105,10 +101,8 @@ public class SemanticValidationDemoTests
             Console.WriteLine($"  Line {d.StartLine}: {d.Message}");
         }
 
-        if (notIndexableDiagnostics.Count == 0)
-        {
-            Console.WriteLine("NOTE: GD3014 not yet implemented in GDSemanticValidator");
-        }
+        Assert.IsTrue(notIndexableDiagnostics.Count > 0,
+            "GD3014 NotIndexable should be produced for the demo cases");
     }
 
     #endregion
@@ -130,10 +124,8 @@ public class SemanticValidationDemoTests
             Console.WriteLine($"  Line {d.StartLine}: {d.Message}");
         }
 
-        if (signalDiagnostics.Count == 0)
-        {
-            Console.WriteLine("NOTE: GD4009 not yet implemented in GDSemanticValidator");
-        }
+        Assert.IsTrue(signalDiagnostics.Count > 0,
+            "GD4009 EmitSignalTypeMismatch should be produced for the demo cases");
     }
 
     #endregion
@@ -152,10 +144,8 @@ public class SemanticValidationDemoTests
             Console.WriteLine($"  Line {d.StartLine}: {d.Message}");
         }
 
-        if (genericArgDiagnostics.Count == 0)
-        {
-            Console.WriteLine("NOTE: GD3017 not yet implemented in GDSemanticValidator");
-        }
+        Assert.IsTrue(genericArgDiagnostics.Count > 0,
+            "GD3017 InvalidGenericArgument should be produced for the demo cases");
     }
 
     [TestMethod]
@@ -170,10 +160,8 @@ public class SemanticValidationDemoTests
             Console.WriteLine($"  Line {d.StartLine}: {d.Message}");
         }
 
-        if (hashableDiagnostics.Count == 0)
-        {
-            Console.WriteLine("NOTE: GD3018 not yet implemented in GDSemanticValidator");
-        }
+        Assert.IsTrue(hashableDiagnostics.Count > 0,
+            "GD3018 DictionaryKeyNotHashable should be produced for the demo cases");
     }
 
     #endregion

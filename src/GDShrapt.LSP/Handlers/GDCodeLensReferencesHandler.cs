@@ -80,11 +80,7 @@ public class GDCodeLensReferencesHandler
     {
         foreach (var loc in group.Locations)
         {
-            if (loc.Confidence != null &&
-                loc.Confidence != Abstractions.GDReferenceConfidence.Strict &&
-                loc.Confidence != Abstractions.GDReferenceConfidence.Union)
-                continue;
-
+            // Reads return the same set as references/CLI (including potential) — no confidence filter.
             var col0 = loc.Column - 1;
             result.Add(new GDLspLocation
             {

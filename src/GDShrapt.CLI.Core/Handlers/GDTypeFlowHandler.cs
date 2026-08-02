@@ -532,23 +532,8 @@ public class GDTypeFlowHandler : IGDTypeFlowHandler
     /// Finds assignments to a symbol.
     /// </summary>
     protected static IEnumerable<GDDualOperatorExpression> FindAssignmentsTo(string symbolName, GDScriptFile script)
-    {
-        if (script?.Class == null || string.IsNullOrEmpty(symbolName))
-            yield break;
-
-        var classIndex = script.ClassIndex;
-        foreach (var node in classIndex.GetNodes<GDDualOperatorExpression>())
-        {
-            if (node.Operator?.OperatorType != GDDualOperatorType.Assignment)
-                continue;
-
-            if (node.LeftExpression is GDIdentifierExpression idExpr &&
-                idExpr.Identifier?.Sequence == symbolName)
-            {
-                yield return node;
-            }
-        }
-    }
+        => script?.SemanticModel?.GetAssignmentExpressionsTo(symbolName)
+           ?? Enumerable.Empty<GDDualOperatorExpression>();
 
     /// <summary>
     /// Gets the kind for an expression.

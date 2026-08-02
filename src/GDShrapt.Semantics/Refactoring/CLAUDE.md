@@ -6,7 +6,7 @@ Refactoring services for GDScript code transformations.
 
 ```
 Refactoring/
-├── Services/           - 17 refactoring services
+├── Services/           - 20 refactoring services
 ├── Context/            - Refactoring context (selection, cursor)
 ├── Results/            - Result types (single-file only in Base)
 ├── GDCrossFileReferenceFinder.cs  - Cross-file reference search
@@ -27,7 +27,7 @@ GDBatchAddTypeAnnotationsResult PlanProject(options);  // Pro
 GDProResult Execute(plan);                              // Pro
 ```
 
-## Services (17)
+## Services (20)
 
 | Service | Scope | Confidence |
 |---------|-------|------------|
@@ -48,6 +48,11 @@ GDProResult Execute(plan);                              // Pro
 | `GDRemoveCommentsService` | Single-file | - |
 | `GDSnippetService` | Single-file | - |
 | `GDFormatCodeService` | Single-file | - |
+| `GDCallHierarchyService` | Cross-file | - |
+| `GDImplementationService` | Cross-file | - |
+| `GDTypeDefinitionService` | Single-file | - |
+
+(`GDSymbolReferenceCollector` is the shared reference-collection utility used by the cross-file services.)
 
 ## Confidence Modes
 
@@ -67,6 +72,37 @@ Cross-file rename with conflict detection.
 - Symbol resolution via SemanticModel
 - Reference collection with confidence
 - Conflict detection (shadowing, redefinition)
+
+**Union/shared reference promotion.** A `Confidence == Union` reference (a member access whose
+receiver's data-flow type is a union `A|B`) is a *shared* reference across all member declarations.
+It is promoted to a **strict** (auto-applied) edit only when **every** type in its
+`SharedTypes` set is renamed in the same operation — i.e. all possible resolutions of the receiver
+produce the identical edit, so the rewrite is risk-free. This naturally happens only when the rename
+covers all members (e.g. the bridge-connected path, where `declaringTypeName` is null and every
+hierarchy's declaration is in scope). Otherwise the union reference stays in `PotentialEdits` (shown,
+never applied), so renaming `A.foo` never silently rewrites `x.foo()` where `x` could be `B`.
+
+Coverage is computed by `BuildRenamedDeclaringTypes` (declaring types of the `Declaration`/`Override`
+refs in this operation) and checked per shared type via `IsTypeCompatible` (direct or inherited).
+`RemoveStrictDuplicatesFromPotential` guarantees a promoted position is not also reported as potential.
+
+The behavior is controlled by `GDRenameService.PromoteFullyCoveredUnionReferences` (default `true`),
+surfaced on `GDRenameHandler` and via the Base CLI `rename --no-union-strict` option. When disabled,
+union/shared references are always kept potential.
+
+**Union references are union-first.** `GDCrossFileReferenceFinder` (Path A and the member-access Path B)
+consults the receiver's raw data-flow union (`DetermineFlowBasedConfidence` reads `CurrentType.Types`)
+**before** the collapsed single-type short-circuit, so branch-merge/ternary/multi-assign and call-site
+parameter unions surface as `Union` references with `SharedTypes`. Path B resolves the member-op from a
+`GDCallExpression.CallerExpression` so the call-node index entry doesn't pre-empt the union entry.
+
+**Union-driven bridge for rename promotion.** A `Union` reference's `SharedTypes` is a data-flow proof
+that a call site is shared across hierarchies, so `FindBridgeMethodsWithDuckRef` treats `Union` (alongside
+duck `Potential`/`NameMatch`) as a bridge connection. `PlanRename(oldName, …, filterFilePath)` checks
+`CollectAllReferences(...).IsBridgeConnected` even when the filter file declares the symbol, and defers to
+the bridge-merge path when connected — so renaming covers every shared-type declaration and the shared
+call is promoted to a strict edit (fully-covered). The call-site param union is treated as a real union
+(promotable); a receiver with no provable union (no call sites) stays Potential.
 
 ### GDCrossFileReferenceFinder
 
@@ -114,6 +150,20 @@ Extracts selected statements into new method.
 3. **Confidence Potential/NameMatch** - Execution requires Pro license
 4. **Rename Conflicts** - Reports but doesn't auto-resolve shadowing
 5. **Extract Variable** - Single expression only, no multi-statement
+
+## Two reference-finding paths (consolidation candidate)
+
+There are currently two reference-finding implementations and two rename entry points:
+
+| Consumer | References | Rename |
+|----------|-----------|--------|
+| CLI / LSP (`GDFindRefsHandler`, `GDRenameHandler`) | `GDSymbolReferenceCollector.CollectReferences` | `GDRenameService.PlanRename(oldName, …)` → same collector |
+| Plugin (`FindReferencesCommand`, gutters, `RenameIdentifierCommand`) | `GDFindReferencesService` | `GDRenameService.PlanRenameAtCursor`/`PlanRenameInScope` → `GDFindReferencesService` |
+
+CLI and LSP are guaranteed identical because they share the collector (pinned by
+`GDShrapt.LSP.Tests/Handlers/GDCliLspParityTests.cs`). The Plugin path is separate and could
+diverge for local scopes (`GDFindReferencesService` only delegates to the unified collector for
+cross-file scopes). Unifying the Plugin onto the CLI/LSP path is a future Plugin-parity task.
 
 ## Files
 

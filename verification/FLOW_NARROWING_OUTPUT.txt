@@ -2801,6 +2801,10 @@ test_scripts/type_guards.gd
     241:10 data -> Dictionary (base: Dictionary)
     244:10 data -> Dictionary (base: Dictionary)
 
+  assert_type_guard()
+    251:8 value -> Dictionary (base: Variant)
+    253:8 value -> Dictionary (base: Variant)
+
   ternary_with_guard()
     259:8 result -> float (base: float)
 
@@ -3188,4 +3192,4 @@ test_scripts/validation_edge_cases.gd
   test_stringname()
     62:17 sn -> String (base: StringName)
 
-# Summary: 2043 narrowings in 53 files
+# Summary: 2045 narrowings in 53 files

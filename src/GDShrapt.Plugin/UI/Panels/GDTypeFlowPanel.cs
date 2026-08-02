@@ -1339,7 +1339,8 @@ internal partial class GDTypeFlowPanel : AcceptDialog
             var originalCode = $"# Before type guard\n{node.Label}  # type: {typesStr}";
             var resultCode = $"# After type guard\nif {node.Label} is {types.FirstOrDefault() ?? "Type"}:\n    # {node.Label} is narrowed to {types.FirstOrDefault() ?? "Type"}\n    pass";
 
-            // Type guard generation is not yet implemented - show preview only
+            // Apply is preview-only in Base (copy the result to apply manually); executing the
+            // guard insertion is a Pro capability. See STATE.md Feature Boundaries / Rule 20.
             var canApply = false;
 
             var dialogResult = await previewDialog.ShowForResult(
@@ -1409,7 +1410,8 @@ internal partial class GDTypeFlowPanel : AcceptDialog
                               $"# Required properties: {propsList}";
             var resultCode = sb.ToString().TrimEnd();
 
-            // Interface generation is not yet implemented - show preview only
+            // Apply is preview-only in Base (copy the result to apply manually); generating the
+            // interface file is a Pro capability. See STATE.md Feature Boundaries / Rule 20.
             var canApply = false;
 
             var dialogResult = await previewDialog.ShowForResult(

@@ -628,6 +628,15 @@ namespace GDShrapt.Semantics
                 case GDStringExpression _:
                     return CreateSimpleType("String");
 
+                case GDRawStringExpression _:
+                    return CreateSimpleType("String");
+
+                case GDStringNameExpression _:
+                    return CreateSimpleType("StringName");
+
+                case GDNodePathExpression _:
+                    return CreateSimpleType("NodePath");
+
                 case GDBoolExpression _:
                     return CreateSimpleType("bool");
 
@@ -1385,16 +1394,6 @@ namespace GDShrapt.Semantics
             => ContainerAnalyzer.InferDictionaryValueTypeForKey(dictExpr, key);
 
         /// <summary>
-        /// Finds the dictionary initializer expression for a dictionary variable.
-        /// Delegates to GDContainerTypeAnalyzer.
-        /// </summary>
-        private GDDictionaryInitializerExpression? FindDictionaryInitializer(GDExpression dictExpr)
-            => ContainerAnalyzer.FindDictionaryInitializer(dictExpr);
-
-        private string? InferDictionaryValueType(GDExpression dictExpr)
-            => ContainerAnalyzer.InferDictionaryValueType(dictExpr);
-
-        /// <summary>
         /// Infers the type for Object.get("property") by looking up the property in the type.
         /// </summary>
         private string? InferObjectGetType(GDCallExpression callExpr, string callerType)
@@ -1487,13 +1486,6 @@ namespace GDShrapt.Semantics
         /// </summary>
         public string InferLambdaReturnType(GDMethodExpression lambda)
             => MethodReturnAnalyzer.InferLambdaReturnType(lambda);
-
-        /// <summary>
-        /// Infers the return type node of a lambda expression by analyzing its body.
-        /// Delegates to GDMethodReturnTypeAnalyzer.
-        /// </summary>
-        private GDTypeNode InferLambdaReturnTypeNode(GDMethodExpression lambda)
-            => MethodReturnAnalyzer.InferLambdaReturnTypeNode(lambda);
 
         #region Callable Semantic Type Builders
 
@@ -2469,27 +2461,6 @@ namespace GDShrapt.Semantics
         /// </summary>
         private GDTypeNode InferAwaitType(GDAwaitExpression awaitExpr)
             => SignalAnalyzer.InferAwaitType(awaitExpr, InferCallType);
-
-        /// <summary>
-        /// Finds a signal declaration in the current class context.
-        /// Delegates to GDSignalTypeAnalyzer.
-        /// </summary>
-        private GDSignalDeclaration FindLocalSignalDeclaration(string signalName, GDNode context)
-            => SignalAnalyzer.FindLocalSignalDeclaration(signalName, context);
-
-        /// <summary>
-        /// Gets the emission type from a signal declaration.
-        /// Delegates to GDSignalTypeAnalyzer.
-        /// </summary>
-        private string GetSignalEmissionTypeFromDecl(GDSignalDeclaration signalDecl)
-            => SignalAnalyzer.GetSignalEmissionTypeFromDecl(signalDecl);
-
-        /// <summary>
-        /// Gets the emission type from signal parameter types list.
-        /// Delegates to GDSignalTypeAnalyzer.
-        /// </summary>
-        private string GetSignalEmissionType(IReadOnlyList<string> paramTypes)
-            => SignalAnalyzer.GetSignalEmissionType(paramTypes);
 
         /// <summary>
         /// Checks if two types are compatible for assignment.

@@ -7,7 +7,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <RootNamespace>GDShrapt.Semantics.Validator</RootNamespace>
     <AssemblyName>GDShrapt.Semantics.Validator</AssemblyName>
-    <Version>6.0.0</Version>
     <Description>Type-based validation for GDScript using semantic analysis</Description>
   </PropertyGroup>
 

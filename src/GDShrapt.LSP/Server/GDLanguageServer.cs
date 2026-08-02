@@ -23,6 +23,7 @@ public class GDLanguageServer : IGDLanguageServer
     private IGDJsonRpcTransport? _transport;
     private GDLspLogger? _logger;
     private GDLspTraceLevel _traceLevel = GDLspTraceLevel.Off;
+    private GDLspSettings _settings = new();
     private string? _initializationError;
     private TaskCompletionSource? _shutdownTcs;
     private TaskCompletionSource<bool>? _analysisComplete;
@@ -83,6 +84,7 @@ public class GDLanguageServer : IGDLanguageServer
         _transport.OnNotification<GDDidChangeConfigurationParams>("workspace/didChangeConfiguration", HandleDidChangeConfigurationAsync);
         _transport.OnRequest<GDWorkspaceSymbolParams, GDLspSymbolInformation[]?>("workspace/symbol", HandleWorkspaceSymbolAsync);
         _transport.OnRequest<GDExecuteCommandParams, object?>("workspace/executeCommand", HandleExecuteCommandAsync);
+        _transport.OnRequest<GDRenameFilesParams, GDWorkspaceEdit?>("workspace/willRenameFiles", HandleWillRenameFilesAsync);
 
         // Language features
         _transport.OnRequest<GDDefinitionParams, GDLspLocationLink[]?>("textDocument/definition", HandleDefinitionAsync);
@@ -94,7 +96,10 @@ public class GDLanguageServer : IGDLanguageServer
         _transport.OnRequest<GDPrepareRenameParams, GDPrepareRenameResult?>("textDocument/prepareRename", HandlePrepareRenameAsync);
         _transport.OnRequest<GDDocumentHighlightParams, GDDocumentHighlight[]?>("textDocument/documentHighlight", HandleDocumentHighlightAsync);
         _transport.OnRequest<GDFoldingRangeParams, GDFoldingRange[]?>("textDocument/foldingRange", HandleFoldingRangeAsync);
+        _transport.OnRequest<GDSelectionRangeParams, GDSelectionRange[]?>("textDocument/selectionRange", HandleSelectionRangeAsync);
+        _transport.OnRequest<GDDocumentLinkParams, GDDocumentLink[]?>("textDocument/documentLink", HandleDocumentLinkAsync);
         _transport.OnRequest<GDDocumentFormattingParams, GDLspTextEdit[]?>("textDocument/formatting", HandleFormattingAsync);
+        _transport.OnRequest<GDDocumentRangeFormattingParams, GDLspTextEdit[]?>("textDocument/rangeFormatting", HandleRangeFormattingAsync);
         _transport.OnRequest<GDCodeActionParams, GDLspCodeAction[]?>("textDocument/codeAction", HandleCodeActionAsync);
         _transport.OnRequest<GDSignatureHelpParams, GDLspSignatureHelp?>("textDocument/signatureHelp", HandleSignatureHelpAsync);
         _transport.OnRequest<GDInlayHintParams, GDLspInlayHint[]?>("textDocument/inlayHint", HandleInlayHintAsync);
@@ -126,6 +131,9 @@ public class GDLanguageServer : IGDLanguageServer
             _ => GDLspTraceLevel.Off
         };
 
+        // Client-supplied tunables (debounce, operation timeout); defaults preserve behavior.
+        _settings = GDLspSettings.FromInitializationOptions(@params.InitializationOptions);
+
         // Determine project root
         var rootPath = @params.RootUri != null
             ? GDDocumentManager.UriToPath(@params.RootUri)
@@ -147,7 +155,12 @@ public class GDLanguageServer : IGDLanguageServer
                     _documentManager = new GDDocumentManager(project);
                     _config = GDConfigLoader.LoadConfig(project.ProjectPath);
                     _analysisComplete = new TaskCompletionSource<bool>();
-                    _diagnosticPublisher = new GDDiagnosticPublisher(_transport!, project, config: _config, analysisReady: _analysisComplete.Task);
+                    _diagnosticPublisher = new GDDiagnosticPublisher(
+                        _transport!, project,
+                        debounceDelay: TimeSpan.FromMilliseconds(_settings.SyntaxDebounceMs),
+                        config: _config,
+                        analysisReady: _analysisComplete.Task,
+                        semanticDebounceDelay: TimeSpan.FromMilliseconds(_settings.SemanticDebounceMs));
                     _project = project;
 
                     var scriptCount = 0;
@@ -192,7 +205,7 @@ public class GDLanguageServer : IGDLanguageServer
                 TextDocumentSync = new GDTextDocumentSyncOptions
                 {
                     OpenClose = true,
-                    Change = GDTextDocumentSyncKind.Full,
+                    Change = GDTextDocumentSyncKind.Incremental,
                     Save = new GDSaveOptions { IncludeText = false }
                 },
                 HoverProvider = true,
@@ -202,7 +215,10 @@ public class GDLanguageServer : IGDLanguageServer
                 RenameProvider = new GDRenameOptions { PrepareProvider = true },
                 DocumentHighlightProvider = true,
                 FoldingRangeProvider = true,
+                SelectionRangeProvider = true,
                 DocumentFormattingProvider = true,
+                DocumentRangeFormattingProvider = true,
+                DocumentLinkProvider = new GDDocumentLinkOptions { ResolveProvider = false },
                 CompletionProvider = new GDCompletionOptions
                 {
                     TriggerCharacters = [".", ":", "(", "$", "/"],
@@ -238,6 +254,22 @@ public class GDLanguageServer : IGDLanguageServer
                 ExecuteCommandProvider = new GDExecuteCommandOptions
                 {
                     Commands = ["gdshrapt.serverStatus"]
+                },
+                Workspace = new GDWorkspaceServerCapabilities
+                {
+                    FileOperations = new GDFileOperationsServerCapabilities
+                    {
+                        WillRename = new GDFileOperationRegistrationOptions
+                        {
+                            Filters =
+                            {
+                                new GDFileOperationFilter
+                                {
+                                    Pattern = new GDFileOperationPattern { Glob = "**/*.{gd,tscn,tres,png,svg,gdshader}" }
+                                }
+                            }
+                        }
+                    }
                 }
             },
             ServerInfo = new GDServerInfo
@@ -409,11 +441,10 @@ public class GDLanguageServer : IGDLanguageServer
 
         if (@params.ContentChanges.Length > 0)
         {
-            // For full sync, take the last change
-            var content = @params.ContentChanges[@params.ContentChanges.Length - 1].Text;
-            _documentManager?.UpdateDocument(
+            // Incremental sync: splice each {range, text} change; a null range replaces the whole doc.
+            _documentManager?.ApplyChanges(
                 @params.TextDocument.Uri,
-                content,
+                @params.ContentChanges,
                 @params.TextDocument.Version);
         }
 
@@ -468,75 +499,8 @@ public class GDLanguageServer : IGDLanguageServer
         if (_project == null)
             return Task.FromResult<GDLspSymbolInformation[]?>(null);
 
-        var query = @params.Query?.ToLowerInvariant() ?? "";
-        var results = new System.Collections.Generic.List<GDLspSymbolInformation>();
-
-        foreach (var script in _project.ScriptFiles)
-        {
-            if (script.Class == null || script.FullPath == null)
-                continue;
-
-            var uri = GDDocumentManager.PathToUri(script.FullPath);
-
-            // Search class members
-            foreach (var member in script.Class.Members)
-            {
-                string? name = null;
-                GDLspSymbolKind kind = GDLspSymbolKind.Variable;
-                int line = 0;
-
-                if (member is Reader.GDMethodDeclaration method)
-                {
-                    name = method.Identifier?.ToString();
-                    kind = GDLspSymbolKind.Method;
-                    line = method.StartLine;
-                }
-                else if (member is Reader.GDVariableDeclaration variable)
-                {
-                    name = variable.Identifier?.ToString();
-                    kind = variable.IsConstant ? GDLspSymbolKind.Constant : GDLspSymbolKind.Variable;
-                    line = variable.StartLine;
-                }
-                else if (member is Reader.GDSignalDeclaration signal)
-                {
-                    name = signal.Identifier?.ToString();
-                    kind = GDLspSymbolKind.Event;
-                    line = signal.StartLine;
-                }
-                else if (member is Reader.GDEnumDeclaration enumDecl)
-                {
-                    name = enumDecl.Identifier?.ToString();
-                    kind = GDLspSymbolKind.Enum;
-                    line = enumDecl.StartLine;
-                }
-                else if (member is Reader.GDInnerClassDeclaration innerClass)
-                {
-                    name = innerClass.Identifier?.ToString();
-                    kind = GDLspSymbolKind.Class;
-                    line = innerClass.StartLine;
-                }
-
-                if (name != null && (string.IsNullOrEmpty(query) || name.ToLowerInvariant().Contains(query)))
-                {
-                    results.Add(new GDLspSymbolInformation
-                    {
-                        Name = name,
-                        Kind = kind,
-                        Location = new GDLspLocation
-                        {
-                            Uri = uri,
-                            Range = new GDLspRange
-                            {
-                                Start = new GDLspPosition { Line = line, Character = 0 },
-                                End = new GDLspPosition { Line = line, Character = 0 }
-                            }
-                        }
-                    });
-                }
-            }
-        }
-
-        return Task.FromResult<GDLspSymbolInformation[]?>(results.ToArray());
+        var handler = new GDWorkspaceSymbolHandler(_project);
+        return handler.HandleAsync(@params, ct);
     }
 
     private Task HandleSetTraceAsync(GDSetTraceParams @params)
@@ -723,7 +687,7 @@ public class GDLanguageServer : IGDLanguageServer
             return Task.FromResult<GDLspCompletionList?>(null);
 
         var handler = new GDLspCompletionHandler(coreHandler, _documentManager);
-        return handler.HandleAsync(@params, ct);
+        return GDLspOperation.RunAsync(token => handler.HandleAsync(@params, token), _settings.OperationTimeoutMs, ct);
     }
 
     private Task<GDWorkspaceEdit?> HandleRenameAsync(GDRenameParams @params, CancellationToken ct)
@@ -749,11 +713,11 @@ public class GDLanguageServer : IGDLanguageServer
         if (_registry == null)
             return Task.FromResult<GDPrepareRenameResult?>(null);
 
-        var goToDefHandler = _registry.GetService<IGDGoToDefHandler>();
-        if (goToDefHandler == null)
+        var renameHandler = _registry.GetService<IGDRenameHandler>();
+        if (renameHandler == null)
             return Task.FromResult<GDPrepareRenameResult?>(null);
 
-        var handler = new GDLspPrepareRenameHandler(goToDefHandler);
+        var handler = new GDLspPrepareRenameHandler(renameHandler);
         return handler.HandleAsync(@params, ct);
     }
 
@@ -788,6 +752,45 @@ public class GDLanguageServer : IGDLanguageServer
         return handler.HandleAsync(@params, ct);
     }
 
+    private Task<GDSelectionRange[]?> HandleSelectionRangeAsync(GDSelectionRangeParams @params, CancellationToken ct)
+    {
+        if (_registry == null)
+            return Task.FromResult<GDSelectionRange[]?>(null);
+
+        var coreHandler = _registry.GetService<IGDSelectionRangeHandler>();
+        if (coreHandler == null)
+            return Task.FromResult<GDSelectionRange[]?>(null);
+
+        var handler = new GDLspSelectionRangeHandler(coreHandler);
+        return handler.HandleAsync(@params, ct);
+    }
+
+    private Task<GDDocumentLink[]?> HandleDocumentLinkAsync(GDDocumentLinkParams @params, CancellationToken ct)
+    {
+        if (_registry == null)
+            return Task.FromResult<GDDocumentLink[]?>(null);
+
+        var coreHandler = _registry.GetService<IGDDocumentLinkHandler>();
+        if (coreHandler == null)
+            return Task.FromResult<GDDocumentLink[]?>(null);
+
+        var handler = new GDLspDocumentLinkHandler(coreHandler);
+        return handler.HandleAsync(@params, ct);
+    }
+
+    private Task<GDWorkspaceEdit?> HandleWillRenameFilesAsync(GDRenameFilesParams @params, CancellationToken ct)
+    {
+        if (_registry == null)
+            return Task.FromResult<GDWorkspaceEdit?>(null);
+
+        var coreHandler = _registry.GetService<IGDFileRenameHandler>();
+        if (coreHandler == null)
+            return Task.FromResult<GDWorkspaceEdit?>(null);
+
+        var handler = new GDLspFileRenameHandler(coreHandler);
+        return handler.HandleAsync(@params, ct);
+    }
+
     private Task<GDLspTextEdit[]?> HandleFormattingAsync(GDDocumentFormattingParams @params, CancellationToken ct)
     {
         _logger?.Debug($"[Formatting] START uri={@params.TextDocument.Uri}");
@@ -800,6 +803,19 @@ public class GDLanguageServer : IGDLanguageServer
             return Task.FromResult<GDLspTextEdit[]?>(null);
 
         var handler = new GDFormattingHandler(coreHandler, _config);
+        return handler.HandleAsync(@params, ct);
+    }
+
+    private Task<GDLspTextEdit[]?> HandleRangeFormattingAsync(GDDocumentRangeFormattingParams @params, CancellationToken ct)
+    {
+        if (_registry == null)
+            return Task.FromResult<GDLspTextEdit[]?>(null);
+
+        var coreHandler = _registry.GetService<IGDFormatHandler>();
+        if (coreHandler == null)
+            return Task.FromResult<GDLspTextEdit[]?>(null);
+
+        var handler = new GDRangeFormattingHandler(coreHandler, _config);
         return handler.HandleAsync(@params, ct);
     }
 
@@ -876,7 +892,7 @@ public class GDLanguageServer : IGDLanguageServer
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var handler = new GDLspCodeLensHandler(coreHandler);
-        var result = await handler.HandleAsync(@params, ct).ConfigureAwait(false);
+        var result = await GDLspOperation.RunAsync(token => handler.HandleAsync(@params, token), _settings.OperationTimeoutMs, ct).ConfigureAwait(false);
         sw.Stop();
 
         _logger?.Debug($"[CodeLens] END {filename} {sw.ElapsedMilliseconds}ms count={result?.Length ?? 0}");
@@ -914,7 +930,7 @@ public class GDLanguageServer : IGDLanguageServer
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var handler = new GDLspSemanticTokensHandler(tokensHandler);
-        var result = await handler.HandleAsync(@params, ct);
+        var result = await GDLspOperation.RunAsync(token => handler.HandleAsync(@params, token), _settings.OperationTimeoutMs, ct).ConfigureAwait(false);
         sw.Stop();
 
         _logger?.Debug($"[SemanticTokens] END {filename} {sw.ElapsedMilliseconds}ms");
@@ -1009,18 +1025,6 @@ public class GDLanguageServer : IGDLanguageServer
     #endregion
 
     #region Trace and Notifications
-
-    private Task TraceAsync(string message, string? verbose = null)
-    {
-        if (_traceLevel == GDLspTraceLevel.Off || _transport == null)
-            return Task.CompletedTask;
-
-        var @params = new GDLogTraceParams { Message = message };
-        if (_traceLevel == GDLspTraceLevel.Verbose && verbose != null)
-            @params.Verbose = verbose;
-
-        return _transport.SendNotificationAsync("$/logTrace", @params);
-    }
 
     private async Task SendProgressAsync(string token, string kind, string? title = null, string? message = null, int? percentage = null)
     {

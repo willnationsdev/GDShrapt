@@ -1,27 +1,27 @@
 ================================================================================
 GDShrapt Diagnostics Report
-Generated: 2026-03-26 06:24:45
+Generated: 2026-06-25 20:55:31
 Project: testproject/GDShrapt.TestProject
 ================================================================================
 
 SUMMARY
 --------------------------------------------------------------------------------
-Total diagnostics: 732
+Total diagnostics: 731
 Scripts analyzed:  63
 
 By Severity:
   Error     :    30
   Hint      :    95
   Info      :    40
-  Warning   :   567
+  Warning   :   566
 
 By Source:
   Linter              :   309
-  SemanticValidator   :   389
+  SemanticValidator   :   388
   Validator           :    34
 
 By Code (Top 30):
-  GD7007    :  181  (Variable 'timer_node' is @onready - _ready() may not have...)
+  GD7007    :  180  (Variable 'timer_node' is @onready - _ready() may not have...)
   GDL201    :  158  (Local variable 'level' is declared but never used)
   GD7006    :   36  (Variable 'data' may be null when accessing '[...]')
   GD3023    :   33  (Function 'create_game_object' returns inconsistent types:...)
@@ -873,7 +873,7 @@ DIAGNOSTICS BY FILE
     74:5   [GDL203] Info - Function 'import_from_json' only contains 'pass'
     74:22  [GDL202] Info - Parameter 'json_string' is declared but never used
 
---- test_scripts/type_guards.gd (10 diagnostics) ---
+--- test_scripts/type_guards.gd (9 diagnostics) ---
 
      8:0   [GD3023] Warning - Function 'process_value' returns inconsistent types: null, int, Array
     65:9   [GD3002] Warning - Potential type mismatch in arithmetic operation: float|int * int
@@ -883,7 +883,6 @@ DIAGNOSTICS BY FILE
    172:0   [GD3023] Warning - Function 'negated_guard' returns inconsistent types: String, Array
    186:6   [GDL201] Warning - Local variable 'value' is declared but never used
    220:12  [GD7005] Warning - Variable 'obj' may be null when accessing 'position'
-   253:8   [GD7007] Warning - Variable 'value' may be null when accessing 'keys'
    268:6   [GD7011] Hint - Redundant type check: 'outer' is already narrowed to 'Dictionary'
 
 --- test_scripts/type_inference.gd (1 diagnostics) ---

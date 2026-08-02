@@ -219,6 +219,7 @@ public class GDFindRefsHandler : IGDFindRefsHandler
                     ReceiverTypeName = sref.IsSignalConnection ? sref.CallerTypeName : null,
                     Confidence = sref.IsContractString || sref.IsSignalConnection || isCrossFile || sref.Confidence == GDReferenceConfidence.Union
                         ? sref.Confidence : (GDReferenceConfidence?)null,
+                    SharedTypes = sref.SharedTypes,
                     Reason = reason,
                     Context = GetSourceLine(sref.FilePath!, line1)
                 });

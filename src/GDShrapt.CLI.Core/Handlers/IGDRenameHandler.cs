@@ -20,6 +20,15 @@ public interface IGDRenameHandler
     string? ResolveSymbolAtPosition(string filePath, int line, int column);
 
     /// <summary>
+    /// Gets the editable identifier range at a position (for prepare-rename), or null if the
+    /// position is not on an identifier. Positions are 1-based.
+    /// </summary>
+    /// <param name="filePath">Full path to the file.</param>
+    /// <param name="line">Line number (1-based).</param>
+    /// <param name="column">Column number (1-based).</param>
+    GDRenameRange? GetRenameRange(string filePath, int line, int column);
+
+    /// <summary>
     /// Validates that a name is a valid GDScript identifier.
     /// </summary>
     /// <param name="name">The identifier to validate.</param>

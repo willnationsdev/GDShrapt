@@ -64,6 +64,8 @@ Validates member access using type inference:
 - Known type: checks if member exists on type
 - Duck typed: allows if type guard present
 - Untyped: reports unguarded access warning
+- Static/instance calls: instance method called on a class name → GD9001 (error); static method called
+  on an instance → GD9002 (Hint, opt-in via `CheckStaticInstanceCalls`, since GDScript permits it)
 
 ### GDArgumentTypeValidator
 
@@ -274,6 +276,7 @@ public class GDSemanticValidatorOptions
     public bool CheckParameterTypeHints { get; set; } = false;      // GD7020 (off by default)
     public bool CheckUntypedContainerAccess { get; set; } = false;  // GD7021 (off by default)
     public bool CheckRedundantAnnotations { get; set; } = false;    // GD7022 (off by default)
+    public bool CheckStaticInstanceCalls { get; set; } = false;     // GD9002 (off by default)
 
     public bool EnableCommentSuppression { get; set; } = true;
 
@@ -378,4 +381,4 @@ dotnet test --filter "Name=AllDiagnostics_MustBeVerifiedOrExcluded"
 - Total/Verified/Unverified/FP counts
 - Details for each unverified or false positive
 
-**Current Status:** 1,122 diagnostics verified (Validator + Linter + Semantics)
+**Current Status:** 933 of 940 diagnostics verified (Validator + Linter + Semantics)

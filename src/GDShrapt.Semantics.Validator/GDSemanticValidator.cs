@@ -98,7 +98,9 @@ public class GDSemanticValidator
             var memberAccessValidator = new GDMemberAccessValidator(
                 context,
                 _memberAccessAnalyzer,
-                _options.MemberAccessSeverity);
+                _options.MemberAccessSeverity,
+                _options.CheckStaticInstanceCalls,
+                _options.StaticInstanceCallSeverity);
             memberAccessValidator.Validate(node);
         }
 
@@ -287,6 +289,17 @@ public class GDSemanticValidatorOptions
     /// Severity for unguarded member access on untyped variables.
     /// </summary>
     public GDDiagnosticSeverity MemberAccessSeverity { get; set; } = GDDiagnosticSeverity.Warning;
+
+    /// <summary>
+    /// Whether to warn when a static method is called on an instance (GD9002).
+    /// GDScript permits this, so it is off by default (style hint).
+    /// </summary>
+    public bool CheckStaticInstanceCalls { get; set; } = false;
+
+    /// <summary>
+    /// Severity for static-method-called-on-instance (GD9002).
+    /// </summary>
+    public GDDiagnosticSeverity StaticInstanceCallSeverity { get; set; } = GDDiagnosticSeverity.Hint;
 
     /// <summary>
     /// Severity for argument type mismatches at call sites.

@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [6.0.0-alpha.7] - 2026-06-25
+
+Pre-release of the 6.0 toolchain (the 5.x line shipped the parser, linter, and
+formatter libraries; 6.0 adds the semantic analysis and tooling layer on top).
+All Base project versions are now centralized in `Directory.Build.props` as a
+single source of truth.
+
+### Added
+
+- **GDShrapt.Semantics** — project-level semantic analysis: SSA-style flow analysis
+  with union types as the primary type source, duck-type inference, and refactoring
+  services (rename, extract, add-type-annotations, reorder-members, and more).
+- **GDShrapt.Semantics.Validator** — type-aware diagnostics (GD3xxx–GD9xxx) built on
+  the semantic model, verified via TDD diagnostic markers.
+- **GDShrapt.CLI** — command-line tooling: `analyze`, `check`, `lint`, `validate`,
+  `format`, `symbols`, `find-refs`, `rename`, `parse`, `extract-style`.
+- **GDShrapt.LSP** — Language Server Protocol 3.17 server sharing the CLI.Core handlers.
+- **GDShrapt.Plugin** — Godot editor integration routed through the shared CLI.Core
+  handler registry (completion, find-references, go-to-definition, rename, format,
+  diagnostics, type-flow).
+
+### Changed
+
+- Library versions unified across all Base projects to a single centralized version.
+
 ## [5.1.0] - 2026-01-08
 
 ### Breaking Changes

@@ -513,8 +513,6 @@ internal class GDParameterUsageAnalyzer : GDVisitor
             return opType == GDSingleOperatorType.Not || opType == GDSingleOperatorType.Not2;
         }
 
-        // Check if used in "if not x is Type" pattern
-        // This is harder to detect, skip for now
         return false;
     }
 

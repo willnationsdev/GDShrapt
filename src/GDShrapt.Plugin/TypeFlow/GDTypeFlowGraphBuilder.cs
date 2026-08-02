@@ -1007,26 +1007,7 @@ internal class GDTypeFlowGraphBuilder
     /// Finds assignment statements to a variable.
     /// </summary>
     private IEnumerable<GDDualOperatorExpression> FindAssignmentsTo(string variableName, GDScriptFile script, GDSemanticModel semanticModel)
-    {
-        if (script.Class == null)
-            yield break;
-
-        foreach (var expr in script.Class.AllNodes.OfType<GDDualOperatorExpression>())
-        {
-            if (expr.OperatorType != GDDualOperatorType.Assignment &&
-                expr.OperatorType != GDDualOperatorType.AddAndAssign &&
-                expr.OperatorType != GDDualOperatorType.SubtractAndAssign &&
-                expr.OperatorType != GDDualOperatorType.MultiplyAndAssign &&
-                expr.OperatorType != GDDualOperatorType.DivideAndAssign)
-                continue;
-
-            var leftStr = expr.LeftExpression?.ToString();
-            if (leftStr == variableName)
-            {
-                yield return expr;
-            }
-        }
-    }
+        => semanticModel.GetAssignmentExpressionsTo(variableName);
 
     /// <summary>
     /// Calculates confidence based on symbol and type information.

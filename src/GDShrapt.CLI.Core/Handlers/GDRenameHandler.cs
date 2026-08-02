@@ -22,6 +22,17 @@ public class GDRenameHandler : IGDRenameHandler
         _goToDefHandler = goToDefHandler;
     }
 
+    /// <summary>
+    /// When true (default), a union/shared reference is auto-applied as a strict edit only when every
+    /// type it is shared across is renamed in the same operation (all resolutions yield the identical
+    /// edit). When false, union/shared references are always kept as potential (shown, never applied).
+    /// </summary>
+    public bool PromoteFullyCoveredUnionReferences
+    {
+        get => _service.PromoteFullyCoveredUnionReferences;
+        set => _service.PromoteFullyCoveredUnionReferences = value;
+    }
+
     /// <inheritdoc />
     public virtual string? ResolveSymbolAtPosition(string filePath, int line, int column)
     {
@@ -32,6 +43,10 @@ public class GDRenameHandler : IGDRenameHandler
         var definition = _goToDefHandler.FindDefinition(fullPath, line, column);
         return definition?.SymbolName;
     }
+
+    /// <inheritdoc />
+    public virtual GDRenameRange? GetRenameRange(string filePath, int line, int column)
+        => GDRenameRangeResolver.Resolve(_project, filePath, line, column);
 
     /// <inheritdoc />
     public virtual bool ValidateIdentifier(string name, out string? error)
