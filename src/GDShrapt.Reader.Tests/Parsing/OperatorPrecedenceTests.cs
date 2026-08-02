@@ -247,6 +247,62 @@ namespace GDShrapt.Reader.Tests
             Assert.AreEqual(GDDualOperatorType.Equal, inner.OperatorType);
         }
 
+        [TestMethod]
+        public void Precedence_Comparison_HigherThan_Not_ExclamationMark()
+        {
+            // !a > 0 → !(a > 0)  — Issue #16 Bug 1, '!' spelling
+            var expr = _reader.ParseExpression("!a > 0");
+            Assert.IsInstanceOfType(expr, typeof(GDSingleOperatorExpression));
+            var unary = (GDSingleOperatorExpression)expr;
+            Assert.AreEqual(GDSingleOperatorType.Not, unary.OperatorType);
+            Assert.IsInstanceOfType(unary.TargetExpression, typeof(GDDualOperatorExpression));
+            var inner = (GDDualOperatorExpression)unary.TargetExpression;
+            Assert.AreEqual(GDDualOperatorType.MoreThan, inner.OperatorType);
+        }
+
+        [TestMethod]
+        public void Precedence_Equal_HigherThan_Not_ExclamationMark()
+        {
+            // !a == b → !(a == b)
+            var expr = _reader.ParseExpression("!a == b");
+            Assert.IsInstanceOfType(expr, typeof(GDSingleOperatorExpression));
+            var unary = (GDSingleOperatorExpression)expr;
+            Assert.AreEqual(GDSingleOperatorType.Not, unary.OperatorType);
+            Assert.IsInstanceOfType(unary.TargetExpression, typeof(GDDualOperatorExpression));
+            var inner = (GDDualOperatorExpression)unary.TargetExpression;
+            Assert.AreEqual(GDDualOperatorType.Equal, inner.OperatorType);
+        }
+
+        #endregion
+
+        #region Ternary vs Assignment and Or (rung 20)
+
+        [TestMethod]
+        public void Precedence_Ternary_LowerThan_Or()
+        {
+            // a or b if c else d → (a or b) if c else d
+            var expr = _reader.ParseExpression("a or b if c else d");
+            Assert.IsInstanceOfType(expr, typeof(GDIfExpression));
+            var ternary = (GDIfExpression)expr;
+            Assert.IsInstanceOfType(ternary.TrueExpression, typeof(GDDualOperatorExpression));
+            Assert.AreEqual(GDDualOperatorType.Or2, ((GDDualOperatorExpression)ternary.TrueExpression).OperatorType);
+            Assert.AreEqual("c", ternary.Condition.ToString());
+            Assert.AreEqual("d", ternary.FalseExpression.ToString());
+        }
+
+        [TestMethod]
+        public void Precedence_Ternary_HigherThan_Assignment()
+        {
+            // x = 0 if flag else 1 → x = (0 if flag else 1)  — Issue #18
+            var expr = _reader.ParseExpression("x = 0 if flag else 1");
+            Assert.IsInstanceOfType(expr, typeof(GDDualOperatorExpression));
+            var assignment = (GDDualOperatorExpression)expr;
+            Assert.AreEqual(GDDualOperatorType.Assignment, assignment.OperatorType);
+            Assert.AreEqual("x", assignment.LeftExpression.ToString());
+            Assert.IsInstanceOfType(assignment.RightExpression, typeof(GDIfExpression));
+            Assert.AreEqual("0", ((GDIfExpression)assignment.RightExpression).TrueExpression.ToString());
+        }
+
         #endregion
 
         #region Not vs And (not > and)

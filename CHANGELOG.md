@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Local `const` declarations** — `const NAME = v`, `const NAME := v` and `const NAME: T = v` inside a
+  function body now parse as a single `GDVariableDeclarationStatement` with `IsConstant == true`
+  instead of separate expression statements (#21). Local constants are registered as constants, so
+  GD5010 (ConstantReassignment) and the SCREAMING_SNAKE_CASE naming rule (GDL004) now apply to them,
+  and GDL003 (snake_case) no longer reports them.
+- **Builder** — `GD.Statement.Constant(...)` / `GD.Statement.AutoConstant(...)` factories for local constants.
+
+### Fixed
+
+- **Qualified type annotations in `for` loops** — `for t: MyClass.MyEnum in items:` now produces a
+  `GDSubTypeNode` instead of leaking `.MyEnum` into the collection expression (#19). `GDForStatement` now
+  delegates to `GDTypeResolver` like every other type-annotation site; the resolver completes a type when a
+  second bare identifier follows, which is what keeps `for i: int in arr` working. Side effect: a type
+  annotation followed by a line break no longer drops the type text from `ToString()`.
+- **Multi-line ternary expressions** — `x = (\n a\n if c\n else b\n)` now keeps `FalseExpression` instead of
+  dropping the `else` branch (#26). Works in parenthesized initializers, call arguments, array initializers
+  and backslash continuations; exact round-trip is preserved.
+
+### Changed
+
+- **Position caching** — `Freeze()` now fills `StartLine` and `NewLinesCount` caches on every `GDNode` in a
+  single pass, turning a whole-file position sweep from O(n²) into O(n). Unfrozen trees keep returning live
+  values, and the paths that can mutate a frozen tree (`GDStringPart.Sequence`,
+  `GDMultiLineSplitToken.Sequence`, and the `ProtectedSet` null→value carve-out) drop the caches.
+  `EndLine` is now derived as `StartLine + NewLinesCount`, so the two can no longer disagree.
+- `GDVariableDeclarationStatement` token slots shifted by one: `ConstKeyword` is slot 0, `VarKeyword` is
+  slot 1. Named properties are unaffected; positional `Form` access must be renumbered.
+
 ## [6.0.0-alpha.7] - 2026-06-25
 
 Pre-release of the 6.0 toolchain (the 5.x line shipped the parser, linter, and

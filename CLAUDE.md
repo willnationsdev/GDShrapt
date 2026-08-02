@@ -167,6 +167,11 @@ Solution: `src/GDShrapt.sln`. Tests use MSTest with FluentAssertions.
 
 **Statements**: `GDIfStatement`, `GDWhileStatement`, `GDForStatement`, `GDMatchStatement`, `GDReturnStatement`, `GDBreakStatement`, `GDContinueStatement`, `GDPassStatement`, `GDAwaitStatement`, `GDVariableDeclarationStatement`, `GDExpressionStatement`, `GDAssertStatement`
 
+`GDVariableDeclarationStatement` covers both local `var` and local `const`. `ConstKeyword` is token slot 0
+(`VarKeyword` is slot 1); use `IsConstant` to distinguish them. Downstream consumers must register a local
+`const` as `GDSymbol.Constant`, not `GDSymbol.Variable`, or GD5010 (ConstantReassignment) and the
+SCREAMING_SNAKE_CASE naming rule will not apply to it.
+
 **Expressions**: `GDNumberLiteral`, `GDStringLiteral`, `GDBooleanLiteral`, `GDNullLiteral`, `GDIdentifier`, `GDMemberAccessExpression`, `GDIndexingExpression`, `GDCallExpression`, `GDArrayExpression`, `GDDictionaryExpression`, `GDBinaryExpression`, `GDUnaryExpression`, `GDAsExpression`, `GDIsExpression`, `GDNodePathExpression`, `GDPreloadExpression`, `GDAwaitExpression`, `GDAssignmentExpression`
 
 ### Design Patterns
@@ -193,7 +198,17 @@ Solution: `src/GDShrapt.sln`. Tests use MSTest with FluentAssertions.
 ## Key Implementation Notes
 
 - `GDReadingState` manages parsing with char-buffer, pending chars mechanism, indentation stack
-- Position tracking: `StartLine`, `EndLine`, `StartColumn`, `EndColumn` on all tokens
+- Position tracking: `StartLine`, `EndLine`, `StartColumn`, `EndColumn` on all tokens. Positions are computed
+  live on a mutable tree; `Freeze()` fills `StartLine`/`NewLinesCount` caches on every `GDNode` in one pass
+  (`NewLinesCount` post-order during the freeze, `StartLine` top-down from the root), which turns a
+  whole-file position sweep from O(n²) into O(n). `EndLine` is derived as `StartLine + NewLinesCount` so the
+  two can never disagree. Freezing a *subtree* caches only `NewLinesCount` — `StartLine` depends on ancestors
+  and stays live. Mutating a frozen tree through the two paths that bypass `ThrowIfFrozen`
+  (`GDStringPart.Sequence`, `GDMultiLineSplitToken.Sequence`, and the `ProtectedSet` null→value carve-out)
+  drops the caches for the whole tree.
+- Type annotations are always parsed by `GDTypeResolver` via `this.ResolveType(c, state)` — never hand-rolled
+  in a node. The resolver completes the type when a second bare identifier arrives, which is what lets
+  `for i: int in arr` terminate the type at `in`.
 - `GDVisitor` has no Visit methods for simple tokens - iterate `node.Form.Direct()` directly
 - Token manipulation: `form.AddBeforeToken()`, `form.AddAfterToken()`, `form.Remove()`
 - `AllTokens` / `AllNodes` are lazy IEnumerable in source code order

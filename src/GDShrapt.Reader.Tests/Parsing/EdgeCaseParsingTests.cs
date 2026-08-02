@@ -1136,6 +1136,52 @@ namespace GDShrapt.Reader.Tests
             ifExpr.TrueExpression.ToString().Should().Be("scale_factor");
         }
 
+        [TestMethod]
+        public void Parser_InlineIf_InPlainAssignment_SpacedNegate_CorrectTrueExpression()
+        {
+            // Issue #14 verbatim repro: note the space in `else - scale_factor`
+            var code = "func _ready():\n\tvar scale_factor = 1\n\tvar direction = -1\n\tscale = scale_factor if direction == 1 else - scale_factor\n";
+            var tree = _reader.ParseFileContent(code);
+
+            AssertHelper.NoInvalidTokens(tree);
+            tree.ToString().Should().Be(code, "the space between `-` and the identifier must be preserved");
+
+            var method = tree.Methods.First();
+            var exprStmt = method.Statements[2] as GDExpressionStatement;
+            var assignExpr = exprStmt.Expression as GDDualOperatorExpression;
+            assignExpr.Should().NotBeNull();
+            assignExpr.OperatorType.Should().Be(GDDualOperatorType.Assignment);
+
+            var ifExpr = assignExpr.RightExpression as GDIfExpression;
+            ifExpr.Should().NotBeNull();
+            ifExpr.TrueExpression.ToString().Should().Be("scale_factor");
+            ifExpr.FalseExpression.Should().BeOfType<GDSingleOperatorExpression>();
+        }
+
+        [TestMethod]
+        public void Parser_InlineIf_AssignmentBindsLooserThanTernary()
+        {
+            // Issue #18 verbatim repro
+            var code = "func f(flag: bool) -> void:\n\tvar x: int = 0\n\tx = 0 if flag else 1\n";
+            var tree = _reader.ParseFileContent(code);
+
+            AssertHelper.NoInvalidTokens(tree);
+            tree.ToString().Should().Be(code);
+
+            var stmt = tree.Methods.First().AllNodes.OfType<GDExpressionStatement>().Last();
+
+            var assignExpr = stmt.Expression as GDDualOperatorExpression;
+            assignExpr.Should().NotBeNull("`x = 0 if flag else 1` must parse as `x = (0 if flag else 1)`");
+            assignExpr.OperatorType.Should().Be(GDDualOperatorType.Assignment);
+            assignExpr.LeftExpression.ToString().Should().Be("x");
+
+            var ifExpr = assignExpr.RightExpression as GDIfExpression;
+            ifExpr.Should().NotBeNull();
+            ifExpr.TrueExpression.ToString().Should().Be("0");
+            ifExpr.Condition.ToString().Should().Be("flag");
+            ifExpr.FalseExpression.ToString().Should().Be("1");
+        }
+
         #endregion
     }
 }
