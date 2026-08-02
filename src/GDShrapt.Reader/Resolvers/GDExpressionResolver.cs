@@ -44,8 +44,18 @@ namespace GDShrapt.Reader
                 _ifExpressionChecked = false;
                 _nextIfKeyword = null;
 
-                var expr = new GDIfExpression(_intendation, NewLineReceiver != null);
+                List<GDSyntaxToken> tokensBeforeIfKeyword = null;
+
+                if (_expression is GDDualOperatorExpression danglingOperatorExpression &&
+                    danglingOperatorExpression.OperatorType == GDDualOperatorType.Null)
+                {
+                    _expression = danglingOperatorExpression.LeftExpression;
+                    tokensBeforeIfKeyword = new List<GDSyntaxToken>(danglingOperatorExpression.Form.GetAllTokensAfter(0));
+                }
+
+                var expr = new GDIfExpression(_intendation, NewLineReceiver != null || _allowNewLines);
                 PushAndSwap(state, expr);
+                SendTokensToNode(expr, tokensBeforeIfKeyword);
                 expr.Add(keyword);
 
                 state.PassChar(c);
@@ -227,6 +237,16 @@ namespace GDShrapt.Reader
                 {
                     if (dualOperatorExpression.OperatorType == GDDualOperatorType.Null)
                     {
+                        // A ternary 'if' may continue the expression across the line break,
+                        // so probe for the keyword before treating the wrapper as a terminator.
+                        if (c == 'i' && !_ifExpressionChecked)
+                        {
+                            _ifExpressionChecked = true;
+                            state.Push(new GDKeywordResolver<GDIfKeyword>(this));
+                            state.PassChar(c);
+                            return;
+                        }
+
                         // This is the end of the expression.
                         var form = dualOperatorExpression.Form;
                         var leftExpression = dualOperatorExpression.LeftExpression;
@@ -295,7 +315,7 @@ namespace GDShrapt.Reader
         }
 
         /// <summary>
-        /// Отправляет токен в ITokenReceiver (Owner или NewLineReceiver)
+        /// Sends the token to an ITokenReceiver (Owner or NewLineReceiver)
         /// </summary>
         private void SendTokenToReceiver(ITokenReceiver receiver, GDCharSequence token)
         {
@@ -306,7 +326,7 @@ namespace GDShrapt.Reader
         }
 
         /// <summary>
-        /// Сливает накопленные токены в Owner (выражение продолжается)
+        /// Flushes the accumulated tokens into the Owner (the expression continues)
         /// </summary>
         private void FlushSplitTokensToOwner()
         {
@@ -320,7 +340,7 @@ namespace GDShrapt.Reader
         }
 
         /// <summary>
-        /// Сливает накопленные токены в state через PassChar (выражение завершено)
+        /// Flushes the accumulated tokens into the state via PassChar (the expression is completed)
         /// </summary>
         private void FlushSplitTokensToState(GDReadingState state)
         {
@@ -338,7 +358,7 @@ namespace GDShrapt.Reader
         }
 
         /// <summary>
-        /// Сливает токены: в Owner если не завершен, иначе в state
+        /// Flushes the tokens into the Owner if it is not completed, otherwise into the state
         /// </summary>
         private void FlushSplitTokens(GDReadingState state)
         {
@@ -352,14 +372,14 @@ namespace GDShrapt.Reader
         }
 
         /// <summary>
-        /// Сливает токены в expression node (для PushAndSwap/PushAndSave)
+        /// Flushes the tokens into the expression node (for PushAndSwap/PushAndSave)
         /// </summary>
         private void FlushSplitTokensToNode(GDExpression node)
         {
             if (_lastSplitTokens == null)
                 return;
 
-            // Используем ITokenReceiver для вызова правильных перегрузок
+            // ITokenReceiver is used to pick the right overloads
             ITokenReceiver receiver = node;
             foreach (var token in _lastSplitTokens)
                 SendTokenToReceiver(receiver, token);
@@ -368,7 +388,46 @@ namespace GDShrapt.Reader
         }
 
         /// <summary>
-        /// Сливает токены в NewLineReceiver
+        /// Moves the already read tokens into a new node, keeping their order
+        /// </summary>
+        private static void SendTokensToNode(GDExpression node, List<GDSyntaxToken> tokens)
+        {
+            if (tokens == null)
+                return;
+
+            ITokenReceiver receiver = node;
+
+            foreach (var token in tokens)
+            {
+                switch (token)
+                {
+                    case GDNewLine newLine:
+                        ((ITokenReceiver<GDNewLine>)receiver).HandleReceivedToken(newLine);
+                        break;
+                    case GDCarriageReturnToken carriageReturn:
+                        receiver.HandleReceivedToken(carriageReturn);
+                        break;
+                    case GDMultiLineSplitToken multiLineSplit:
+                        receiver.HandleReceivedToken(multiLineSplit);
+                        break;
+                    case GDSpace space:
+                        receiver.HandleReceivedToken(space);
+                        break;
+                    case GDComment comment:
+                        receiver.HandleReceivedToken(comment);
+                        break;
+                    case GDInvalidToken invalidToken:
+                        receiver.HandleReceivedToken(invalidToken);
+                        break;
+                    default:
+                        node.Form.AddBeforeActiveToken(token);
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Flushes the tokens into the NewLineReceiver
         /// </summary>
         private void FlushSplitTokensToNewLineReceiver()
         {
@@ -400,7 +459,7 @@ namespace GDShrapt.Reader
                         {
                             _expression = null;
 
-                            // Сохраняем токены для передачи в state после CompleteExpression
+                            // Keep the tokens to pass them into the state after CompleteExpression
                             var savedTokens = _lastSplitTokens;
                             _lastSplitTokens = null;
 

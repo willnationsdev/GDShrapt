@@ -300,7 +300,166 @@ func test():
 
         #endregion
 
-        #region String format % on continuation line (Issue #16)
+        #region Multi-line ternary if expressions (Issue #26)
+
+        [TestMethod]
+        public void Ternary_ParenthesizedMultiLine_PreservesFalseExpression()
+        {
+            var code = "var values = []\nvar x: int = (\n\tvalues.back()\n\tif values.size() > 0\n\telse 0\n)\n";
+            var tree = _reader.ParseFileContent(code);
+
+            var variable = tree.Variables.Single(x => x.Identifier.ToString() == "x");
+            var bracket = variable.Initializer as GDBracketExpression;
+            bracket.Should().NotBeNull("the initializer is parenthesized");
+
+            var ternary = bracket!.InnerExpression as GDIfExpression;
+            ternary.Should().NotBeNull("the parenthesized expression should contain a ternary if expression");
+
+            ternary!.TrueExpression.Should().NotBeNull();
+            ternary.TrueExpression!.ToString().Should().Be("values.back()");
+            ternary.IfKeyword.Should().NotBeNull();
+            ternary.Condition.Should().NotBeNull();
+            ternary.Condition!.ToString().Should().Be("values.size() > 0");
+            ternary.ElseKeyword.Should().NotBeNull();
+            ternary.FalseExpression.Should().NotBeNull("the expression after `else` should be parsed");
+            ternary.FalseExpression!.ToString().Should().Be("0");
+
+            tree.ToString().Should().Be(code, "multi-line ternary must round-trip exactly");
+            tree.AllInvalidTokens.Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void Ternary_MultiLineInsideCallArguments_DoesNotThrow()
+        {
+            var code = "func f(c, a, b):\n\tprint(\n\t\ta\n\t\tif c\n\t\telse b\n\t)\n";
+
+            GDClassDeclaration tree = null;
+            var act = () => tree = _reader.ParseFileContent(code);
+
+            act.Should().NotThrow("the parser must degrade to invalid tokens, never throw");
+
+            var ternary = tree!.AllNodes.OfType<GDIfExpression>().SingleOrDefault();
+            ternary.Should().NotBeNull();
+            ternary!.TrueExpression!.ToString().Should().Be("a");
+            ternary.Condition!.ToString().Should().Be("c");
+            ternary.FalseExpression!.ToString().Should().Be("b");
+
+            tree.ToString().Should().Be(code);
+            tree.AllInvalidTokens.Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void Ternary_MultiLineInsideArrayInitializer_DoesNotThrow()
+        {
+            var code = "func f(c, x, y):\n\tvar a = [\n\t\tx\n\t\tif c\n\t\telse y\n\t]\n";
+
+            GDClassDeclaration tree = null;
+            var act = () => tree = _reader.ParseFileContent(code);
+
+            act.Should().NotThrow();
+
+            var ternary = tree!.AllNodes.OfType<GDIfExpression>().SingleOrDefault();
+            ternary.Should().NotBeNull();
+            ternary!.FalseExpression!.ToString().Should().Be("y");
+
+            tree.ToString().Should().Be(code);
+            tree.AllInvalidTokens.Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void Ternary_MultiLineWithCommentBeforeIf_PreservesComment()
+        {
+            var code = "var c = true\nvar x = (\n\t1  # why\n\tif c\n\telse 2\n)\n";
+            var tree = _reader.ParseFileContent(code);
+
+            var ternary = tree.AllNodes.OfType<GDIfExpression>().SingleOrDefault();
+            ternary.Should().NotBeNull();
+            ternary!.FalseExpression!.ToString().Should().Be("2");
+
+            tree.ToString().Should().Be(code, "the comment before `if` must survive the unwrap");
+            tree.AllInvalidTokens.Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void Ternary_MultiLineWithBackslashContinuation_PreservesFalseExpression()
+        {
+            var code = "var c = true\nvar x = 1 \\\n\tif c \\\n\telse 2\n";
+            var tree = _reader.ParseFileContent(code);
+
+            var ternary = tree.AllNodes.OfType<GDIfExpression>().SingleOrDefault();
+            ternary.Should().NotBeNull();
+            ternary!.TrueExpression!.ToString().Should().Be("1");
+            ternary.FalseExpression!.ToString().Should().Be("2");
+
+            tree.ToString().Should().Be(code);
+            tree.AllInvalidTokens.Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void Ternary_MultiLineNested_ParsesBothLevels()
+        {
+            var code = "var c = true\nvar d = false\nvar x = (\n\t1\n\tif c\n\telse (\n\t\t2\n\t\tif d\n\t\telse 3\n\t)\n)\n";
+            var tree = _reader.ParseFileContent(code);
+
+            tree.AllNodes.OfType<GDIfExpression>().Count().Should().Be(2);
+
+            tree.ToString().Should().Be(code);
+            tree.AllInvalidTokens.Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void Ternary_MultiLineFalseBranchContinues_ParsesFullExpression()
+        {
+            var code = "var c = true\nvar x = (\n\t1\n\tif c\n\telse 2\n\t\t+ 3\n)\n";
+            var tree = _reader.ParseFileContent(code);
+
+            var ternary = tree.AllNodes.OfType<GDIfExpression>().SingleOrDefault();
+            ternary.Should().NotBeNull();
+            ternary!.FalseExpression.Should().BeOfType<GDDualOperatorExpression>();
+
+            tree.ToString().Should().Be(code);
+            tree.AllInvalidTokens.Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public void MultiLine_InOperatorOnContinuationLine_NotInterceptedByIfProbe()
+        {
+            var code = "var y = []\nvar r = (\n\t1\n\tin y\n)\n";
+            var tree = _reader.ParseFileContent(code);
+
+            tree.AllNodes.OfType<GDIfExpression>().Should().BeEmpty("`in` must not be parsed as a ternary `if`");
+
+            tree.ToString().Should().Be(code);
+        }
+
+        [TestMethod]
+        public void MultiLine_IsOperatorOnContinuationLine_NotInterceptedByIfProbe()
+        {
+            var code = "var y = null\nvar r = (\n\ty\n\tis Node\n)\n";
+            var tree = _reader.ParseFileContent(code);
+
+            tree.AllNodes.OfType<GDIfExpression>().Should().BeEmpty("`is` must not be parsed as a ternary `if`");
+
+            tree.ToString().Should().Be(code);
+        }
+
+        [TestMethod]
+        public void Ternary_ParenthesizedMultiLine_CarriageReturnLineEndings()
+        {
+            var code = "var values = []\r\nvar x: int = (\r\n\tvalues.back()\r\n\tif values.size() > 0\r\n\telse 0\r\n)\r\n";
+            var tree = _reader.ParseFileContent(code);
+
+            var ternary = tree.AllNodes.OfType<GDIfExpression>().SingleOrDefault();
+            ternary.Should().NotBeNull();
+            ternary!.FalseExpression!.ToString().Should().Be("0");
+
+            tree.ToOriginalString().Should().Be(code);
+            tree.AllInvalidTokens.Should().BeEmpty();
+        }
+
+        #endregion
+
+        #region String format % on continuation line (Issue #17)
 
         [TestMethod]
         public void StringFormat_PercentOnContinuationLine_NoException()
@@ -320,6 +479,25 @@ func test():
             var call = stmt!.Expression as GDCallExpression;
             call.Should().NotBeNull("print should be parsed as a call expression");
             call!.Parameters.Count.Should().Be(1, "print(\"hello %s %s\" % [...]) should have exactly 1 argument");
+        }
+
+        [TestMethod]
+        public void StringFormat_PercentOnContinuationLine_IssueRepro_NoException()
+        {
+            // Issue #17 verbatim: no space after the comma inside the array
+            var code = "class_name T\nextends RefCounted\n\nfunc foo() -> void:\n\tprint(\"hello %s %s\"\n\t\t% [\"world\",\"!\"])\n";
+
+            GDClassDeclaration tree = null;
+            var act = () => tree = _reader.ParseFileContent(code);
+
+            act.Should().NotThrow("the parser must never throw out of ParseFileContent");
+
+            tree!.AllInvalidTokens.Should().BeEmpty();
+            tree.ToString().Should().Be(code);
+
+            var call = (tree.Methods.First().Statements.First() as GDExpressionStatement)!.Expression as GDCallExpression;
+            call.Should().NotBeNull();
+            call!.Parameters.Count.Should().Be(1);
         }
 
         #endregion
