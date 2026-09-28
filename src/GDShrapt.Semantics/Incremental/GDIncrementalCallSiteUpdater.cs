@@ -29,7 +29,7 @@ namespace GDShrapt.Semantics
         public void UpdateSemanticModel(
             GDScriptProject project,
             string filePath,
-            GDClassDeclaration oldTree,
+            GDClassDeclaration? oldTree,
             GDClassDeclaration newTree,
             IReadOnlyList<GDTextChange> changes,
             CancellationToken cancellationToken = default)
@@ -165,7 +165,7 @@ namespace GDShrapt.Semantics
         /// <summary>
         /// Finds methods that were added, removed, or modified.
         /// </summary>
-        private MethodChanges FindChangedMethods(GDClassDeclaration oldTree, GDClassDeclaration newTree)
+        private MethodChanges FindChangedMethods(GDClassDeclaration? oldTree, GDClassDeclaration? newTree)
         {
             var changes = new MethodChanges();
 
@@ -334,8 +334,8 @@ namespace GDShrapt.Semantics
         /// Tries to resolve the type of an identifier from method parameters,
         /// local variable declarations, or class-level variable declarations.
         /// </summary>
-        private string ResolveIdentifierType(
-            string identifierName,
+        private string? ResolveIdentifierType(
+            string? identifierName,
             GDMethodDeclaration method,
             GDScriptFile file)
         {
@@ -388,7 +388,7 @@ namespace GDShrapt.Semantics
         /// <summary>
         /// Gets the name of the method being called.
         /// </summary>
-        private string GetCalledMethodName(GDCallExpression call)
+        private string? GetCalledMethodName(GDCallExpression call)
         {
             var callee = call.CallerExpression;
 

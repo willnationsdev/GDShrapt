@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
@@ -56,7 +57,7 @@ namespace GDShrapt.Reader
         /// <param name="tree">The AST root to validate.</param>
         /// <param name="expectedText">Optional expected text for text equivalence check.</param>
         /// <returns>Validation result with any errors found.</returns>
-        public static ValidationResult Validate(GDClassDeclaration tree, string expectedText = null)
+        public static ValidationResult Validate(GDClassDeclaration tree, string? expectedText = null)
         {
             if (tree == null)
                 return ValidationResult.Invalid("Tree is null");
@@ -91,7 +92,7 @@ namespace GDShrapt.Reader
         /// Validates that all parent-child relationships are consistent.
         /// Each token's Parent property should point to its actual parent in the tree.
         /// </summary>
-        private static void ValidateParentChildRelations(GDNode node, GDNode expectedParent, List<string> errors)
+        private static void ValidateParentChildRelations(GDNode node, GDNode? expectedParent, List<string> errors)
         {
             // Check that node's parent matches expected
             if (expectedParent != null && node.Parent != expectedParent)
@@ -199,7 +200,7 @@ namespace GDShrapt.Reader
 
             int prevEndLine = 0;
             int prevEndColumn = 0;
-            GDSyntaxToken prevToken = null;
+            GDSyntaxToken? prevToken = null;
 
             foreach (var token in allTokens)
             {
@@ -286,7 +287,8 @@ namespace GDShrapt.Reader
         /// <summary>
         /// Truncates a string to a maximum length.
         /// </summary>
-        private static string Truncate(string s, int maxLength)
+        [return: NotNullIfNotNull(nameof(s))]
+        private static string? Truncate(string? s, int maxLength)
         {
             if (s == null)
                 return null;
@@ -414,7 +416,7 @@ namespace GDShrapt.Reader
         {
             public static readonly ReferenceEqualityComparer<T> Instance = new ReferenceEqualityComparer<T>();
 
-            public bool Equals(T x, T y) => ReferenceEquals(x, y);
+            public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
 
             public int GetHashCode(T obj) => RuntimeHelpers.GetHashCode(obj);
         }

@@ -242,6 +242,14 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
     /// </summary>
     public void LoadScripts()
     {
+        LoadScripts(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Loads all scripts from the project directory, checking cancellation between files.
+    /// </summary>
+    public void LoadScripts(CancellationToken cancellationToken)
+    {
         if (!_fileSystem.DirectoryExists(_context.ProjectPath))
         {
             _logger.Warning($"Project path does not exist: {_context.ProjectPath}");
@@ -252,6 +260,7 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 
         foreach (var scriptFile in allScripts)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _logger.Debug($"Loading script '{Path.GetFileName(scriptFile)}'");
 
             var reference = new GDScriptReference(scriptFile, _context);
