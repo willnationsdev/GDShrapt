@@ -1,7 +1,7 @@
 ﻿using ConsoleAppFramework;
 using GDShrapt.Converter;
+using GDShrapt.Semantics;
 using Godot;
-using System.Collections.Concurrent;
 using System.Text.Json;
 
 var app = ConsoleApp.Create();
@@ -19,30 +19,23 @@ public class BasicCommands
     /// <param name="output">Optional output JSON path. Defaults to gdshrapt-analysis.json in the project root.</param>
     public async Task Analyze([Argument] string path = ".", string? output = null)
     {
-        var progressBarOptions = new ShellProgressBar.ProgressBarOptions
-        {
-            ForegroundColor = ConsoleColor.Yellow,
-            BackgroundColor = ConsoleColor.DarkYellow,
-            ProgressCharacter = '-',
-        };
-        var childProgressBarOptions = new ShellProgressBar.ProgressBarOptions
-        {
-            ForegroundColor = ConsoleColor.Green,
-            BackgroundColor = ConsoleColor.DarkGreen,
-            ProgressCharacter = '-',
-        };
-        ShellProgressBar.ProgressBar? progress = null;
-        ConcurrentDictionary<int, ShellProgressBar.ChildProgressBar> childProgressBars = new();
+        var projectRoot = GDProjectLoader.FindProjectRoot(path) ?? Path.GetFullPath(path);
         GDConversionAnalysis? analysis = null;
 
         try
         {
             analysis = await GDConversionAnalyzer.AnalyzeAsync(path, new GDConversionAnalysisOptions
             {
-                EnableParallelAnalysis = false,
-                ProgressStarting = SetupProgress,
-                ItemProgressStart = ReportProgressStart,
-                ItemProgressEnd = ReportProgress,
+                EnableParallelAnalysis = true,
+                // The JSON artifact contains script metadata, not inferred call-site types.
+                EnrichCallSites = false,
+                ItemProgressStart = progress =>
+                {
+                    var relativePath = string.IsNullOrEmpty(progress.CurrentFile)
+                        ? string.Empty
+                        : Path.GetRelativePath(projectRoot, progress.CurrentFile);
+                    Console.WriteLine($"START [{progress.CompletedFiles:D4} of {progress.TotalFiles:D4}]: {relativePath}");
+                },
             });
 
             var artifact = new
@@ -67,8 +60,10 @@ public class BasicCommands
                 })
             };
 
+            Console.WriteLine($"Analyzed {analysis.Scripts.Count} scripts.");
+
             var outputPath = string.IsNullOrWhiteSpace(output)
-                ? Path.Combine(analysis.Project.ProjectPath, "gdshrapt-analysis.json")
+                ? analysis.Project.ProjectPath.PathJoin("gdshrapt-analysis.json")
                 : Path.GetFullPath(output);
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
             await File.WriteAllTextAsync(outputPath, JsonSerializer.Serialize(artifact, new JsonSerializerOptions
@@ -76,46 +71,11 @@ public class BasicCommands
                 WriteIndented = true
             }));
 
-            Console.WriteLine($"Analyzed {analysis.Scripts.Count} scripts.");
             Console.WriteLine($"Analysis artifact: {outputPath}");
         }
         finally
         {
-            foreach (var childProgressBar in childProgressBars.Values)
-            {
-                childProgressBar.Dispose();
-            }
-            progress?.Dispose();
             analysis?.Dispose();
-            Console.BackgroundColor = ConsoleColor.Black;
-            Console.ForegroundColor = ConsoleColor.White;
-        }
-
-        void SetupProgress(int total)
-        {
-            progress = new ShellProgressBar.ProgressBar(total, $"Scanning files... [0 of {total}]", progressBarOptions);
-        }
-
-        void ReportProgressStart(GDShrapt.Semantics.AnalysisProgress ap)
-        {
-            var i = ap.CompletedFiles + 1;
-            var msg = $"Start {i} of {ap.TotalFiles} {Console.CursorTop}/{Console.WindowHeight}: {ap.CurrentFile}";
-            var child = progress!.Spawn(1, msg, childProgressBarOptions);
-            childProgressBars[ap.CompletedFiles] = child;
-            child.Tick($"End {i} of {ap.TotalFiles} {Console.CursorTop}/{Console.WindowHeight}: {ap.CurrentFile}");
-            var progressMsg = $"Scanning files... [{i} of {ap.TotalFiles}]";
-            progress!.Tick(progressMsg);
-        }
-
-        void ReportProgress(GDShrapt.Semantics.AnalysisProgress ap)
-        {
-            if (childProgressBars.TryGetValue(ap.CompletedFiles, out var child))
-            {
-                var i = ap.CompletedFiles + 1;
-                child.Tick($"End {i} of {ap.TotalFiles} {Console.CursorTop}/{Console.WindowHeight}: {ap.CurrentFile}");
-                var progressMsg = $"Scanning files... [{i} of {ap.TotalFiles}]";
-                progress!.Tick(progressMsg);
-            }
         }
     }
 
