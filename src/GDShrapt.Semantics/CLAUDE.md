@@ -18,6 +18,8 @@ Detailed documentation is in folder-level CLAUDE.md files:
 
 ## Public API Surface
 
+`GDScriptProjectOptions.FocusPath` can optionally scope semantic analysis to a project-relative or absolute directory. All scripts are still loaded for project-wide type/name resolution, while per-file analysis, cross-method inference, and call-site collection are limited to that directory tree.
+
 Two facades provide all external access. Implementation details are `internal`.
 
 ### GDSemanticModel (file-level)

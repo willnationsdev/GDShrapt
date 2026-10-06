@@ -38,6 +38,7 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
     private readonly GDSceneChangeReanalysisService? _sceneChangeService;
     private readonly bool _enableFileWatcher;
     private readonly GDScriptProjectOptions? _options;
+    private readonly string? _focusPath;
     private FileSystemWatcher? _scriptsWatcher;
     private bool _disposed;
     private IReadOnlyList<GDAutoloadEntry>? _autoloadEntries;
@@ -121,6 +122,15 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
     public IEnumerable<GDScriptFile> ScriptFiles => _scripts.Values;
 
     /// <summary>
+    /// Scripts selected for semantic analysis. When a focus path is configured,
+    /// scripts outside that directory tree remain loaded as project context.
+    /// </summary>
+    internal IEnumerable<GDScriptFile> AnalysisScriptFiles =>
+        _scripts.Values.Where(script => IsPathInAnalysisScope(script.FullPath));
+
+    internal bool HasFocusPath => _focusPath != null;
+
+    /// <summary>
     /// Scene types provider for node path type resolution.
     /// </summary>
     public GDSceneTypesProvider? SceneTypesProvider => _sceneTypesProvider;
@@ -196,6 +206,10 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
         _fileSystem = options?.FileSystem ?? new GDDefaultFileSystem();
         _logger = options?.Logger ?? GDNullLogger.Instance;
         _enableFileWatcher = options?.EnableFileWatcher ?? false;
+        var focusPath = options?.FocusPath;
+        _focusPath = string.IsNullOrWhiteSpace(focusPath)
+            ? null
+            : Path.GetFullPath(focusPath, Path.GetFullPath(_context.ProjectPath));
 
         if (options?.EnableSceneTypesProvider == true)
         {
@@ -324,8 +338,8 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
         var compositeProvider = CreateRuntimeProvider();
         var nodeTypeInjector = CreateNodeTypeInjector();
 
-        var scripts = _scripts.Values;
-        var total = scripts.Count;
+        var scripts = AnalysisScriptFiles.ToArray();
+        var total = scripts.Length;
         var completed = 0;
         var progressStartingCallback = _options?.ProgressStarting;
         var progressItemStartCallback = _options?.ItemProgressStart;
@@ -372,7 +386,7 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 
         try
         {
-            Parallel.ForEach(_scripts.Values, options, script =>
+            Parallel.ForEach(scripts, options, script =>
             {
                 int idx = 0;
                 try
@@ -429,7 +443,7 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
         _logger.Verbose("Project report constructed");
 
         var filesByType = new Dictionary<string, GDScriptFile>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in ScriptFiles)
+        foreach (var file in AnalysisScriptFiles)
         {
             if (!string.IsNullOrEmpty(file.TypeName))
                 filesByType[file.TypeName] = file;
@@ -749,7 +763,7 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 
         var updater = new GDIncrementalCallSiteUpdater(CreateRuntimeProvider());
 
-        foreach (var scriptFile in _scripts.Values)
+        foreach (var scriptFile in AnalysisScriptFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -784,7 +798,7 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
         IReadOnlyList<GDTextChange> changes,
         CancellationToken cancellationToken = default)
     {
-        if (_callSiteRegistry == null || string.IsNullOrEmpty(filePath))
+        if (_callSiteRegistry == null || string.IsNullOrEmpty(filePath) || !IsPathInAnalysisScope(filePath))
             return;
 
         var updater = new GDIncrementalCallSiteUpdater(CreateRuntimeProvider());
@@ -792,6 +806,19 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
     }
 
     #endregion
+
+    internal bool IsPathInAnalysisScope(string? path)
+    {
+        if (_focusPath == null)
+            return true;
+        if (string.IsNullOrEmpty(path))
+            return false;
+
+        var relativePath = Path.GetRelativePath(_focusPath, Path.GetFullPath(path));
+        return relativePath != ".."
+            && !relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            && !Path.IsPathRooted(relativePath);
+    }
 
     private void OnSceneScriptsNeedReanalysis(object? sender, GDSceneAffectedScriptsEventArgs e)
     {
@@ -1017,6 +1044,12 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 /// </summary>
 public class GDScriptProjectOptions
 {
+    /// <summary>
+    /// Optional directory to limit semantic analysis to. Relative paths are resolved
+    /// from the project root; scripts outside the directory remain available as context.
+    /// </summary>
+    public string? FocusPath { get; set; }
+
     /// <summary>
     /// Custom file system implementation.
     /// </summary>

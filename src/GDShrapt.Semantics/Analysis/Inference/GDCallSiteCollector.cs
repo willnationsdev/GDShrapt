@@ -56,7 +56,7 @@ internal class GDCallSiteCollector
             return;
         visited.Add(key);
 
-        foreach (var scriptFile in _project.ScriptFiles)
+        foreach (var scriptFile in _project.AnalysisScriptFiles)
         {
             var collector = new ScriptCallSiteVisitor(
                 scriptFile,
@@ -86,7 +86,7 @@ internal class GDCallSiteCollector
                 visited.Add(baseKey);
 
                 // Check if the base type has this method defined in a project script
-                var baseScript = _project.ScriptFiles
+                var baseScript = _project.AnalysisScriptFiles
                     .FirstOrDefault(s => s.TypeName == baseType);
 
                 if (baseScript?.Class != null)

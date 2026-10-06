@@ -13,7 +13,7 @@ app.Run(args);
 
 public class BasicCommands
 {
-    private static GDConversionAnalysisOptions CreateDefaultAnalysisOptions(string projectRoot) => new GDConversionAnalysisOptions
+    private static GDConversionAnalysisOptions CreateDefaultAnalysisOptions(string projectRoot, string? focusPath) => new GDConversionAnalysisOptions
     {
         EnableParallelAnalysis = true,
         // The JSON artifact contains script metadata, not inferred call-site types.
@@ -25,6 +25,7 @@ public class BasicCommands
                 : Path.GetRelativePath(projectRoot, progress.CurrentFile);
             Console.WriteLine($"START [{progress.CompletedFiles:D4} of {progress.TotalFiles:D4}]: {relativePath}");
         },
+        FocusPath = focusPath,
         Logger = GDConsoleLogger.Instance,
     };
 
@@ -40,7 +41,7 @@ public class BasicCommands
 
         try
         {
-            analysis = await GDConversionAnalyzer.AnalyzeAsync(path, CreateDefaultAnalysisOptions(projectRoot));
+            analysis = await GDConversionAnalyzer.AnalyzeAsync(path, CreateDefaultAnalysisOptions(projectRoot, path));
 
             var artifact = new
             {
@@ -67,7 +68,7 @@ public class BasicCommands
             Console.WriteLine($"Analyzed {analysis.Scripts.Count} scripts.");
 
             var outputPath = string.IsNullOrWhiteSpace(output)
-                ? analysis.Project.ProjectPath.PathJoin("gdshrapt-analysis.json")
+                ? (Directory.Exists(path) ? path : analysis.Project.ProjectPath).PathJoin("gdshrapt-analysis.json")
                 : Path.GetFullPath(output);
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
             await File.WriteAllTextAsync(outputPath, JsonSerializer.Serialize(artifact, new JsonSerializerOptions
@@ -92,7 +93,7 @@ public class BasicCommands
     public async Task Convert([Argument] string path, [Argument] string output, bool dryRun)
     {
         var projectRoot = GDProjectLoader.FindProjectRoot(path) ?? Path.GetFullPath(path);
-        using var analysis = await GDConversionAnalyzer.AnalyzeAsync(path, CreateDefaultAnalysisOptions(projectRoot));
+        using var analysis = await GDConversionAnalyzer.AnalyzeAsync(path, CreateDefaultAnalysisOptions(projectRoot, path));
         var conversionService = new GDConversionService();
         var plan = conversionService.CreatePlan(analysis, GDConversionRuleSet.Empty);
 

@@ -74,11 +74,29 @@ internal class GDInferenceCycleDetector
         if (projectTypesProvider == null)
             return;
 
+        HashSet<string>? inScopeMethodKeys = null;
+        if (_project.HasFocusPath)
+        {
+            inScopeMethodKeys = new HashSet<string>();
+            foreach (var typeName in projectTypesProvider.GetAllTypes())
+            {
+                var scriptInfo = projectTypesProvider.GetScriptInfoForType(typeName);
+                if (scriptInfo?.Class == null || !_project.IsPathInAnalysisScope(scriptInfo.FullPath))
+                    continue;
+
+                foreach (var method in scriptInfo.Class.Members.OfType<GDMethodDeclaration>())
+                {
+                    if (method.Identifier != null)
+                        inScopeMethodKeys.Add($"{typeName}.{method.Identifier.Sequence}");
+                }
+            }
+        }
+
         // For each script/type
         foreach (var typeName in projectTypesProvider.GetAllTypes())
         {
             var scriptInfo = projectTypesProvider.GetScriptInfoForType(typeName);
-            if (scriptInfo?.Class == null)
+            if (scriptInfo?.Class == null || !_project.IsPathInAnalysisScope(scriptInfo.FullPath))
                 continue;
 
             // For each method
@@ -90,16 +108,17 @@ internal class GDInferenceCycleDetector
                 var methodKey = $"{typeName}.{method.Identifier.Sequence}";
                 _methods.Add(methodKey);
 
-                // Analyze method body for call sites
-                if (method.Statements != null)
-                {
-                    var bodyAnalyzer = new MethodBodyAnalyzer(methodKey, typeName, runtimeProvider);
-                    method.Statements.WalkIn(bodyAnalyzer);
+                // Analyze method body for call dependencies
+                if (method.Statements == null)
+                    continue;
 
-                    foreach (var dep in bodyAnalyzer.Dependencies)
-                    {
+                var bodyAnalyzer = new MethodBodyAnalyzer(methodKey, typeName, runtimeProvider);
+                method.Statements.WalkIn(bodyAnalyzer);
+
+                foreach (var dep in bodyAnalyzer.Dependencies)
+                {
+                    if (inScopeMethodKeys == null || inScopeMethodKeys.Contains(dep.ToMethod))
                         AddDependency(dep);
-                    }
                 }
             }
         }

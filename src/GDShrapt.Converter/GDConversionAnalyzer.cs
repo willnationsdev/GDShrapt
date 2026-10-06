@@ -11,6 +11,12 @@ public sealed record GDConversionAnalysisOptions
     public int MaxDegreeOfParallelism { get; init; } = -1;
 
     /// <summary>
+    /// An optional directory path that limits semantic analysis to files in that directory and its subdirectories.
+    /// Relative paths are resolved from the project root.
+    /// </summary>
+    public string? FocusPath { get; init; }
+
+    /// <summary>
     /// An optional callback invoked to setup progress UI for the analyzing process.
     /// </summary>
     public Action<int>? ProgressStarting { get; set; }
@@ -87,6 +93,7 @@ public static class GDConversionAnalyzer
                 EnableSceneTypesProvider = options.IncludeSceneTypes,
                 EnableCallSiteRegistry = false,
                 EnableSceneChangeReanalysis = false,
+                FocusPath = options.FocusPath,
                 SemanticsConfig = semanticsConfig,
                 ProgressStarting = options.ProgressStarting,
                 ItemProgressStart = options.ItemProgressStart,

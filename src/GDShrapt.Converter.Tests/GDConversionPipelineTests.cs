@@ -38,6 +38,44 @@ public sealed class GDConversionPipelineTests
     }
 
     [TestMethod]
+    public async Task AnalyzeAsync_FocusPathLimitsSemanticAnalysisToDirectoryTree()
+    {
+        var focusDirectory = Path.Combine(_projectDirectory, "scripts", "focus");
+        var nestedDirectory = Path.Combine(focusDirectory, "nested");
+        var outsideDirectory = Path.Combine(_projectDirectory, "scripts", "other");
+        Directory.CreateDirectory(nestedDirectory);
+        Directory.CreateDirectory(outsideDirectory);
+        File.WriteAllText(
+            Path.Combine(focusDirectory, "target.gd"),
+            "class_name Target\nextends RefCounted\nfunc accept(value):\n\tpass\nfunc call_target():\n\taccept(1)\n");
+        File.WriteAllText(
+            Path.Combine(nestedDirectory, "in_scope_caller.gd"),
+            "class_name InScopeCaller\nextends RefCounted\nfunc call_target():\n\tpass\n");
+        File.WriteAllText(
+            Path.Combine(outsideDirectory, "out_of_scope_caller.gd"),
+            "class_name OutOfScopeCaller\nextends RefCounted\nfunc call_target(target: Target):\n\ttarget.accept(\"outside\")\n");
+
+        var analyzedFileCount = 0;
+        using var analysis = await GDConversionAnalyzer.AnalyzeAsync(
+            _projectDirectory,
+            new GDConversionAnalysisOptions
+            {
+                FocusPath = Path.Combine("scripts", "focus"),
+                MaxDegreeOfParallelism = 1,
+                ProgressStarting = count => analyzedFileCount = count
+            });
+
+        Assert.AreEqual(5, analysis.Scripts.Count);
+        Assert.AreEqual(2, analyzedFileCount);
+        var target = analysis.Scripts.Single(script => script.TypeName == "Target");
+        var inScopeCaller = analysis.Scripts.Single(script => script.TypeName == "InScopeCaller");
+        var outOfScopeCaller = analysis.Scripts.Single(script => script.TypeName == "OutOfScopeCaller");
+        Assert.IsNotNull(target.SemanticModel);
+        Assert.IsNotNull(inScopeCaller.SemanticModel);
+        Assert.IsNull(outOfScopeCaller.SemanticModel);
+    }
+
+    [TestMethod]
     public async Task CreatePlan_SelectsHighestPriorityMatchingRule()
     {
         using var analysis = await CreateAnalysisAsync();
