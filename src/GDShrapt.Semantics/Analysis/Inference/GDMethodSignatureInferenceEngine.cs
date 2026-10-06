@@ -60,12 +60,16 @@ internal class GDMethodSignatureInferenceEngine
             if (!string.IsNullOrEmpty(file.TypeName))
                 filesByType[file.TypeName] = file;
         }
+        _project.Logger.Debug("BuildAll(): Lookup built");
 
         _cycleDetector.BuildDependencyGraph();
+        _project.Logger.Debug("BuildAll(): Dependency graph built");
         _cycleDetector.DetectCycles();
+        _project.Logger.Debug("BuildAll(): Cycle detection completed");
 
         var inferenceOrder = _cycleDetector.GetInferenceOrder().ToList();
 
+        var i = 0;
         foreach (var (methodKey, inCycle) in inferenceOrder)
         {
             var parts = methodKey.Split('.');
@@ -75,6 +79,7 @@ internal class GDMethodSignatureInferenceEngine
             var methodName = parts[1];
 
             var report = InferMethodSignatureInternal(typeName, methodName, inCycle);
+            _project.Logger.Debug($"BuildAll(): Pass 1 [{++i:D4} of {inferenceOrder.Count:D4}]: {methodKey}, InCycle={inCycle}, Report='{report?.ClassName}'");
             if (report != null)
             {
                 _methodReports[methodKey] = report;
@@ -84,6 +89,7 @@ internal class GDMethodSignatureInferenceEngine
                     file.SemanticModel?.SetCallSiteTypesFromReport(report);
             }
         }
+        i = 0;
 
         // Pass 2: Refine parameter types in reverse order (callers first).
         // After pass 1, all initial types are injected. Pass 2 re-infers methods
@@ -102,6 +108,7 @@ internal class GDMethodSignatureInferenceEngine
             var methodName = parts[1];
 
             var newReport = InferMethodSignatureInternal(typeName, methodName, inCycle);
+            _project.Logger.Debug($"BuildAll(): Pass 2 [{++i:D4} of {inferenceOrder.Count:D4}]: {methodKey}, InCycle={inCycle}, Report='{newReport?.ClassName}'");
             if (newReport != null && IsImprovedReport(newReport, _methodReports.GetValueOrDefault(methodKey)))
             {
                 _methodReports[methodKey] = newReport;
@@ -111,6 +118,7 @@ internal class GDMethodSignatureInferenceEngine
         }
 
         _projectReport = BuildProjectReport();
+        _project.Logger.Debug("BuildAll(): Project report built");
         _isBuilt = true;
     }
 

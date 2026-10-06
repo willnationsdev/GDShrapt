@@ -1,4 +1,5 @@
 ﻿using ConsoleAppFramework;
+using GDShrapt.Abstractions;
 using GDShrapt.Converter;
 using GDShrapt.Semantics;
 using Godot;
@@ -12,6 +13,21 @@ app.Run(args);
 
 public class BasicCommands
 {
+    private static GDConversionAnalysisOptions CreateDefaultAnalysisOptions(string projectRoot) => new GDConversionAnalysisOptions
+    {
+        EnableParallelAnalysis = true,
+        // The JSON artifact contains script metadata, not inferred call-site types.
+        EnrichCallSites = true,
+        ItemProgressStart = progress =>
+        {
+            var relativePath = string.IsNullOrEmpty(progress.CurrentFile)
+                ? string.Empty
+                : Path.GetRelativePath(projectRoot, progress.CurrentFile);
+            Console.WriteLine($"START [{progress.CompletedFiles:D4} of {progress.TotalFiles:D4}]: {relativePath}");
+        },
+        Logger = GDConsoleLogger.Instance,
+    };
+
     /// <summary>
     /// Produces a JSON analysis artifact for all scripts in the specified project.
     /// </summary>
@@ -24,19 +40,7 @@ public class BasicCommands
 
         try
         {
-            analysis = await GDConversionAnalyzer.AnalyzeAsync(path, new GDConversionAnalysisOptions
-            {
-                EnableParallelAnalysis = true,
-                // The JSON artifact contains script metadata, not inferred call-site types.
-                EnrichCallSites = false,
-                ItemProgressStart = progress =>
-                {
-                    var relativePath = string.IsNullOrEmpty(progress.CurrentFile)
-                        ? string.Empty
-                        : Path.GetRelativePath(projectRoot, progress.CurrentFile);
-                    Console.WriteLine($"START [{progress.CompletedFiles:D4} of {progress.TotalFiles:D4}]: {relativePath}");
-                },
-            });
+            analysis = await GDConversionAnalyzer.AnalyzeAsync(path, CreateDefaultAnalysisOptions(projectRoot));
 
             var artifact = new
             {
@@ -87,7 +91,8 @@ public class BasicCommands
     /// <param name="dryRun">Print planned outputs without writing files.</param>
     public async Task Convert([Argument] string path, [Argument] string output, bool dryRun)
     {
-        using var analysis = await GDConversionAnalyzer.AnalyzeAsync(path);
+        var projectRoot = GDProjectLoader.FindProjectRoot(path) ?? Path.GetFullPath(path);
+        using var analysis = await GDConversionAnalyzer.AnalyzeAsync(path, CreateDefaultAnalysisOptions(projectRoot));
         var conversionService = new GDConversionService();
         var plan = conversionService.CreatePlan(analysis, GDConversionRuleSet.Empty);
 

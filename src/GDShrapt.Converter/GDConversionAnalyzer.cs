@@ -24,6 +24,8 @@ public sealed record GDConversionAnalysisOptions
     /// An optional callback invoked to iterate progress UI for the analyzing process, marking the completion of an item.
     /// </summary>
     public Action<AnalysisProgress>? ItemProgressEnd { get; set; }
+
+    public IGDLogger? Logger { get; set; }
 }
 
 /// <summary>
@@ -89,6 +91,7 @@ public static class GDConversionAnalyzer
                 ProgressStarting = options.ProgressStarting,
                 ItemProgressStart = options.ItemProgressStart,
                 ItemProgressEnd = options.ItemProgressEnd,
+                Logger = options.Logger,
             });
 
         try

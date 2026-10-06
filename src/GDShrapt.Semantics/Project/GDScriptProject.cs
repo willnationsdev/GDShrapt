@@ -423,8 +423,10 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
     {
         var engine = new GDMethodSignatureInferenceEngine(this);
         engine.BuildAll();
+        _logger.Verbose("Inference engine built");
 
         var projectReport = engine.GetProjectReport();
+        _logger.Verbose("Project report constructed");
 
         var filesByType = new Dictionary<string, GDScriptFile>(StringComparer.OrdinalIgnoreCase);
         foreach (var file in ScriptFiles)
@@ -438,6 +440,7 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
             if (filesByType.TryGetValue(report.ClassName, out var file))
             {
                 file.SemanticModel?.SetCallSiteTypesFromReport(report);
+                _logger.Verbose($"CallSites Updated for '{methodKey}': {file.ResPath}");
             }
         }
     }
