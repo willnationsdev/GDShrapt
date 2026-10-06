@@ -1,4 +1,4 @@
-using GDShrapt.Converter;
+using GDShrapt.Converter.Planning;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace GDShrapt.Converter.Tests;
