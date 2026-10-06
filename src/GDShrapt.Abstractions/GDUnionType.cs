@@ -85,6 +85,13 @@ public class GDUnionType
         if (type == null || type.IsVariant)
             return;
 
+        if (type is GDUnionSemanticType unionType)
+        {
+            foreach (var memberType in unionType.Types)
+                AddType(memberType, isHighConfidence);
+            return;
+        }
+
         Types.Add(type);
 
         if (!isHighConfidence)
@@ -100,6 +107,13 @@ public class GDUnionType
 
         if (type == null || type.IsVariant)
             return;
+
+        if (type is GDUnionSemanticType unionType)
+        {
+            foreach (var memberType in unionType.Types)
+                AddType(memberType, origin);
+            return;
+        }
 
         Types.Add(type);
 
@@ -147,19 +161,7 @@ public class GDUnionType
 
         if (other._origins != null)
         {
-            if (_origins == null)
-                _origins = new Dictionary<GDSemanticType, List<GDTypeOrigin>>();
-
-            foreach (var kv in other._origins)
-            {
-                if (!_origins.TryGetValue(kv.Key, out var list))
-                {
-                    list = new List<GDTypeOrigin>();
-                    _origins[kv.Key] = list;
-                }
-
-                list.AddRange(kv.Value);
-            }
+            MergeOrigins(other._origins, this);
         }
     }
 
@@ -442,18 +444,7 @@ public class GDUnionType
         if (source._origins == null)
             return;
 
-        if (target._origins == null)
-            target._origins = new Dictionary<GDSemanticType, List<GDTypeOrigin>>();
-
-        foreach (var kv in source._origins)
-        {
-            if (!target._origins.TryGetValue(kv.Key, out var list))
-            {
-                list = new List<GDTypeOrigin>();
-                target._origins[kv.Key] = list;
-            }
-            list.AddRange(kv.Value);
-        }
+        MergeOrigins(source._origins, target);
     }
 
     private static void CopyOriginsForType(GDUnionType source, GDSemanticType sourceType, GDUnionType target, GDSemanticType? targetType = null)
@@ -463,15 +454,40 @@ public class GDUnionType
 
         var key = targetType ?? sourceType;
 
+        MergeOrigins(key, sourceOrigins, target);
+    }
+
+    private static void MergeOrigins(Dictionary<GDSemanticType, List<GDTypeOrigin>> source, GDUnionType target)
+    {
+        foreach (var kv in source)
+            MergeOrigins(kv.Key, kv.Value, target);
+    }
+
+    private static void MergeOrigins(GDSemanticType type, List<GDTypeOrigin> source, GDUnionType target)
+    {
         if (target._origins == null)
             target._origins = new Dictionary<GDSemanticType, List<GDTypeOrigin>>();
 
-        if (!target._origins.TryGetValue(key, out var list))
+        if (!target._origins.TryGetValue(type, out var targetOrigins))
         {
-            list = new List<GDTypeOrigin>();
-            target._origins[key] = list;
+            targetOrigins = new List<GDTypeOrigin>(source.Count);
+            target._origins[type] = targetOrigins;
+
+            var copiedOrigins = new HashSet<GDTypeOrigin>();
+            foreach (var origin in source)
+            {
+                if (copiedOrigins.Add(origin))
+                    targetOrigins.Add(origin);
+            }
+            return;
         }
-        list.AddRange(sourceOrigins);
+
+        var uniqueOrigins = new HashSet<GDTypeOrigin>(targetOrigins);
+        foreach (var origin in source)
+        {
+            if (uniqueOrigins.Add(origin))
+                targetOrigins.Add(origin);
+        }
     }
 
     private static bool IsNumericType(string type) =>

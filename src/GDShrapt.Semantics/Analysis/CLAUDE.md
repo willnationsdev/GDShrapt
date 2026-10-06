@@ -153,7 +153,7 @@ Most internal methods (scope queries, nullability, onready, cross-method flow, l
 
 **Flow Handling:**
 - **If/Elif/Else**: Creates child states per branch, merges on exit (union of types)
-- **For/While loops**: Fixed-point iteration (max 10 iterations via `ComputeLoopFixedPoint()`)
+- **For/While loops**: Bounded fixed-point iteration re-runs the body from the joined loop-entry type state (fixed cap: 10 passes). Intermediate passes skip per-node snapshots; a final pass records node states at the stabilized or capped entry types.
 - **Match statements**: Per-case flow states with pattern-based narrowing; `_matchSubjectStack` tracks match subject for binding type inference
 - **Lambdas**: Captures flow state at definition time (not invocation time)
 - **Type narrowing**: `x is Type`, `typeof()`, `assert()`, null checks
@@ -629,7 +629,6 @@ IReadOnlyList<string> FindTypesWithProperty(string propertyName);
 |-------|-------|-----------|
 | `GDSemanticModel` | `_expressionTypeInProgress` HashSet | 50 |
 | `GDSemanticReferenceCollector` | `_recordingTypes` HashSet | - |
-| `GDFlowAnalyzer` | `MaxFixedPointIterations` | 10 |
 | `GDInferenceCycleDetector` | Tarjan's SCC | - |
 | `GDGodotTypesProvider.IsAssignableTo` | `visited` HashSet + self-ref check | - |
 | `GDProjectTypesProvider` | `ConcurrentDictionary<string, byte>` + `lock(method)` | - |

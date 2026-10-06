@@ -1,5 +1,6 @@
 using GDShrapt.Abstractions;
 using GDShrapt.Reader;
+using System.Collections.Generic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Linq;
 
@@ -1276,13 +1277,187 @@ func get_something():
 
     #endregion
 
-    #region Fixed-Point Loop Analysis Tests
+    #region Loop State Merging Tests
+
+    [TestMethod]
+    public void FlowAnalysis_NestedLoopsAndBranches_Completes()
+    {
+        var code = @"
+extends Node
+
+func test(items):
+    var result = 0
+    for outer in items:
+        if outer:
+            for inner in items:
+                if inner:
+                    result = ""text""
+                else:
+                    result = 1.5
+        else:
+            result = false
+    print(result)
+";
+        var (classDecl, model) = AnalyzeCode(code);
+        var method = FindMethod(classDecl, "test");
+        Assert.IsNotNull(method);
+
+        var printCall = FindAllCallExpressions(method)
+            .FirstOrDefault(c => c.CallerExpression is GDIdentifierExpression id && id.Identifier?.Sequence == "print");
+        Assert.IsNotNull(printCall, "Should find print() call");
+        var resultRef = printCall.Parameters?.FirstOrDefault() as GDIdentifierExpression;
+        Assert.IsNotNull(resultRef);
+
+        var resultType = model.GetExpressionType(resultRef)?.DisplayName;
+
+        Assert.IsNotNull(resultType, "Nested loop analysis should preserve a queryable result type");
+    }
+
+    [TestMethod]
+    public void FlowAnalysis_LoopBackEdge_ContributesTypesInsideAndAfterLoop()
+    {
+        var (method, analyzer, model) = AnalyzeLoopBackEdge();
+        var printCalls = method.AllNodes
+            .OfType<GDCallExpression>()
+            .Where(c => c.CallerExpression is GDIdentifierExpression id
+                && id.Identifier?.Sequence == "print"
+                && c.Parameters?.FirstOrDefault() is GDIdentifierExpression parameter
+                && parameter.Identifier?.Sequence == "value")
+            .ToArray();
+        Assert.AreEqual(2, printCalls.Length);
+        var insideRead = printCalls[0].Parameters?.FirstOrDefault() as GDIdentifierExpression;
+        var afterRead = printCalls[1].Parameters?.FirstOrDefault() as GDIdentifierExpression;
+        Assert.IsNotNull(insideRead);
+        Assert.IsNotNull(afterRead);
+
+        var insideFlow = analyzer.GetVariableTypeAtLocation("value", insideRead);
+        var afterFlow = analyzer.FinalState.GetVariableType("value");
+        var publicInsideFlow = model.GetVariableTypeAt("value", insideRead);
+        var publicAfterFlow = model.GetVariableTypeAt("value", afterRead);
+        var expectedTypes = new HashSet<GDSemanticType>
+        {
+            GDSemanticType.FromRuntimeTypeName("int"),
+            GDSemanticType.FromRuntimeTypeName("String")
+        };
+
+        Assert.IsNotNull(insideFlow);
+        Assert.IsNotNull(afterFlow);
+        Assert.IsTrue(insideFlow.CurrentType.Types.SetEquals(expectedTypes),
+            $"Expected loop-body read to include the initial and back-edge types; got {insideFlow.EffectiveTypeFormatted}");
+        Assert.IsTrue(afterFlow.CurrentType.Types.SetEquals(expectedTypes),
+            $"Expected after-loop read to include the initial and body types; got {afterFlow.EffectiveTypeFormatted}");
+        Assert.IsNotNull(publicInsideFlow);
+        Assert.IsNotNull(publicAfterFlow);
+        Assert.IsTrue(publicInsideFlow.CurrentType.Types.SetEquals(expectedTypes),
+            $"Public query should return the fixed-point type inside the loop; got {publicInsideFlow.EffectiveTypeFormatted}");
+        Assert.IsTrue(publicAfterFlow.CurrentType.Types.SetEquals(expectedTypes),
+            $"Public query should return the fixed-point type after the loop; got {publicAfterFlow.EffectiveTypeFormatted}");
+    }
+
+    [TestMethod]
+    public void FlowAnalysis_LoopFixedPoint_PropagatesTypesAcrossStatementOrder()
+    {
+        var code = @"
+extends Node
+
+func test():
+    var first = 1
+    var second = 2
+    for i in range(2):
+        first = second
+        second = ""text""
+        if i >= 0:
+            print(first)
+    print(first)
+";
+        var (classDecl, model) = AnalyzeCode(code);
+        var method = FindMethod(classDecl, "test");
+        Assert.IsNotNull(method);
+        var printCalls = method.AllNodes
+            .OfType<GDCallExpression>()
+            .Where(c => c.CallerExpression is GDIdentifierExpression id && id.Identifier?.Sequence == "print")
+            .ToArray();
+        Assert.AreEqual(2, printCalls.Length);
+        var insideRead = printCalls[0].Parameters?.FirstOrDefault() as GDIdentifierExpression;
+        var afterRead = printCalls[1].Parameters?.FirstOrDefault() as GDIdentifierExpression;
+        Assert.IsNotNull(insideRead);
+        Assert.IsNotNull(afterRead);
+
+        var insideFlow = model.GetVariableTypeAt("first", insideRead);
+        var afterFlow = model.GetVariableTypeAt("first", afterRead);
+        var expectedTypes = new HashSet<GDSemanticType>
+        {
+            GDSemanticType.FromRuntimeTypeName("int"),
+            GDSemanticType.FromRuntimeTypeName("String")
+        };
+
+        Assert.IsNotNull(insideFlow);
+        Assert.IsNotNull(afterFlow);
+        Assert.IsTrue(insideFlow.CurrentType.Types.SetEquals(expectedTypes),
+            $"The later assignment to second should reach first on a subsequent loop pass; got {insideFlow.EffectiveTypeFormatted}");
+        Assert.IsTrue(afterFlow.CurrentType.Types.SetEquals(expectedTypes),
+            $"The loop exit should include all propagated types; got {afterFlow.EffectiveTypeFormatted}");
+    }
+
+    [TestMethod]
+    public void FlowAnalysis_LoopBreak_PreservesAssignmentsOnBreakPath()
+    {
+        var code = @"
+extends Node
+
+func test():
+    var value = 1
+    for i in range(2):
+        value = ""text""
+        break
+    print(value)
+";
+        var (classDecl, model) = AnalyzeCode(code);
+        var method = FindMethod(classDecl, "test");
+        Assert.IsNotNull(method);
+        var valueRead = method.AllNodes
+            .OfType<GDCallExpression>()
+            .Where(c => c.CallerExpression is GDIdentifierExpression id && id.Identifier?.Sequence == "print")
+            .Select(c => c.Parameters?.FirstOrDefault() as GDIdentifierExpression)
+            .FirstOrDefault(parameter => parameter?.Identifier?.Sequence == "value");
+        Assert.IsNotNull(valueRead);
+
+        var flowType = model.GetVariableTypeAt("value", valueRead);
+
+        Assert.IsNotNull(flowType);
+        Assert.IsTrue(flowType.CurrentType.Types.Contains(GDSemanticType.FromRuntimeTypeName("int")));
+        Assert.IsTrue(flowType.CurrentType.Types.Contains(GDSemanticType.FromRuntimeTypeName("String")));
+    }
+
+    private static (GDMethodDeclaration Method, GDFlowAnalyzer Analyzer, GDSemanticModel Model) AnalyzeLoopBackEdge()
+    {
+        var code = @"
+extends Node
+
+func test():
+    var value = 1
+    for i in range(2):
+        if i >= 0:
+            print(value)
+        value = ""text""
+    print(value)
+";
+        var reference = new GDScriptReference("test.gd");
+        var scriptFile = new GDScriptFile(reference);
+        scriptFile.Reload(code);
+        var model = GDSemanticModel.Create(scriptFile, new GDGodotTypesProvider());
+        var classDecl = scriptFile.Class;
+        var method = FindMethod(classDecl, "test");
+        Assert.IsNotNull(method);
+        var analyzer = model.EnsureFlowAnalyzer(method);
+        Assert.IsNotNull(analyzer);
+        return (method, analyzer, model);
+    }
 
     [TestMethod]
     public void FlowAnalysis_ForLoop_FixedPointIteration_MergesCorrectly()
     {
-        // Test that fixed-point iteration correctly merges types
-        // Using direct GDFlowState to test the merge behavior
+        // Use direct GDFlowState instances to test the loop merge behavior.
 
         // Arrange: pre-loop state
         var preLoop = new GDFlowState();
@@ -1292,7 +1467,7 @@ func get_something():
         var firstIter = preLoop.CreateChild();
         firstIter.SetVariableType("x", GDSemanticType.FromRuntimeTypeName("String"));
 
-        // Simulate fixed-point: merge iteration back with pre-loop
+        // Include both the loop-body and zero-iteration paths.
         var merged = GDFlowState.MergeBranches(firstIter, preLoop, preLoop);
 
         // Assert - after merge, x should be Union(int, String)
@@ -1314,7 +1489,7 @@ func get_something():
         var firstIter = preLoop.CreateChild();
         firstIter.SetVariableType("x", GDSemanticType.FromRuntimeTypeName("int"));
 
-        // Merge iteration back with pre-loop
+        // Include both the loop-body and zero-iteration paths.
         var merged = GDFlowState.MergeBranches(firstIter, preLoop, preLoop);
 
         // Assert - after merge, x should still be just int
@@ -1428,6 +1603,33 @@ func get_something():
         iteration2.DeclareVariable("x", null, GDSemanticType.FromRuntimeTypeName("String"));
         var changed2 = state.MergeInto(iteration2);
         Assert.IsFalse(changed2, "Second merge with same type should not change state");
+    }
+
+    [TestMethod]
+    public void FlowState_RepeatedBranchMerges_DoNotDuplicateOrigins()
+    {
+        var intType = GDSemanticType.FromRuntimeTypeName("int");
+        var stringType = GDSemanticType.FromRuntimeTypeName("String");
+        var initialOrigin = new GDTypeOrigin(
+            GDTypeOriginKind.Initialization,
+            GDTypeOriginConfidence.Inferred,
+            new GDFlowLocation("test.gd", 1, 0));
+        var assignmentOrigin = new GDTypeOrigin(
+            GDTypeOriginKind.Assignment,
+            GDTypeOriginConfidence.Inferred,
+            new GDFlowLocation("test.gd", 2, 0));
+        var preLoop = new GDFlowState();
+        preLoop.DeclareVariable("value", null, intType, null, initialOrigin);
+        var loopBody = preLoop.CreateChild();
+        loopBody.SetVariableType("value", stringType, assignmentOrigin);
+
+        var merged = loopBody;
+        for (var i = 0; i < 100; i++)
+            merged = GDFlowState.MergeBranches(merged, preLoop, preLoop);
+
+        var currentType = merged.GetVariableType("value")!.CurrentType;
+        Assert.AreEqual(1, currentType.GetOrigins(intType).Count);
+        Assert.AreEqual(1, currentType.GetOrigins(stringType).Count);
     }
 
     #endregion

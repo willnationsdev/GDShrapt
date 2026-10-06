@@ -1747,7 +1747,8 @@ internal class GDSemanticReferenceCollector : GDVisitor
         {
             if (member is GDMethodDeclaration method)
             {
-                var flowAnalyzer = new GDFlowAnalyzer((IGDExpressionTypeProvider?)_typeEngine);
+                var flowAnalyzer = new GDFlowAnalyzer(
+                    (IGDExpressionTypeProvider?)_typeEngine);
                 flowAnalyzer.Analyze(method);
 
                 // Local variable usage profiles

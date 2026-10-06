@@ -1,72 +1,64 @@
 using System;
+using System.Collections.Generic;
 using GDShrapt.Abstractions;
 
 namespace GDShrapt.Semantics;
 
 /// <summary>
 /// Static helper methods for loop flow analysis.
-/// Provides fixed-point iteration and iterator type inference.
+/// Provides loop-state merging and iterator type inference.
 /// </summary>
 internal static class GDLoopFlowHelper
 {
     /// <summary>
-    /// Maximum iterations for fixed-point loop analysis.
+    /// Merges normal and continue paths with the pre-loop state for the next loop entry.
     /// </summary>
-    public const int MaxFixedPointIterations = 10;
+    public static GDFlowState MergeLoopBackEdge(
+        GDFlowState preLoopState,
+        GDFlowState loopBodyState,
+        IEnumerable<GDFlowState> continueStates)
+    {
+        var merged = preLoopState;
+        if (!loopBodyState.IsTerminated)
+            merged = GDFlowState.MergeBranches(loopBodyState, merged, preLoopState);
+
+        foreach (var continueState in continueStates)
+            merged = MergeContinuingState(merged, continueState, preLoopState);
+
+        return merged;
+    }
 
     /// <summary>
-    /// Computes the fixed-point for loop type analysis.
-    /// Iterates until types stabilize or max iterations reached.
+    /// Merges all possible loop exit paths: zero iterations, normal completion, break, and continue-to-condition paths.
     /// </summary>
-    public static GDFlowState ComputeLoopFixedPoint(
+    public static GDFlowState MergeLoopExit(
         GDFlowState preLoopState,
-        GDFlowState firstIterationState,
-        string? iteratorName,
-        string? iteratorType)
+        GDFlowState loopBodyState,
+        IEnumerable<GDFlowState> breakStates,
+        IEnumerable<GDFlowState> continueStates)
     {
-        // Start with the result of the first iteration
-        var currentState = firstIterationState;
+        var merged = preLoopState;
+        if (!loopBodyState.IsTerminated)
+            merged = GDFlowState.MergeBranches(loopBodyState, merged, preLoopState);
 
-        // Get initial snapshot
-        var previousSnapshot = currentState.GetTypeSnapshot();
+        foreach (var breakState in breakStates)
+            merged = MergeContinuingState(merged, breakState, preLoopState);
 
-        // Iterate until fixed point or max iterations
-        for (int i = 0; i < MaxFixedPointIterations; i++)
-        {
-            // Simulate another iteration: loop body starts with types from either before the loop or after previous iteration
-            var mergedEntry = GDFlowState.MergeBranches(currentState, preLoopState, preLoopState);
+        foreach (var continueState in continueStates)
+            merged = MergeContinuingState(merged, continueState, preLoopState);
 
-            var iterationState = mergedEntry.CreateChild();
+        return merged;
+    }
 
-            // Re-declare iterator if present
-            if (!string.IsNullOrEmpty(iteratorName))
-            {
-                iterationState.DeclareVariable(iteratorName, null, GDSemanticType.FromRuntimeTypeName(iteratorType));
-            }
-
-            // Merge the new iteration state into current state
-            // This accumulates types across iterations
-            var changed = currentState.MergeInto(iterationState);
-
-            if (!changed)
-            {
-                break;
-            }
-
-            // Also check via snapshot comparison
-            var newSnapshot = currentState.GetTypeSnapshot();
-            if (currentState.MatchesSnapshot(previousSnapshot))
-            {
-                break;
-            }
-
-            previousSnapshot = newSnapshot;
-        }
-
-        // Final merge: loop may execute 0+ times
-        // So the result is the union of pre-loop state (0 iterations)
-        // and the fixed-point state (1+ iterations)
-        return GDFlowState.MergeBranches(currentState, preLoopState, preLoopState);
+    private static GDFlowState MergeContinuingState(
+        GDFlowState merged,
+        GDFlowState branchState,
+        GDFlowState parentState)
+    {
+        var continuingState = branchState.Clone();
+        continuingState.IsTerminated = false;
+        continuingState.Termination = null;
+        return GDFlowState.MergeBranches(continuingState, merged, parentState);
     }
 
     /// <summary>

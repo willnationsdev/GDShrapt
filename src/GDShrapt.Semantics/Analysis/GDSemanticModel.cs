@@ -82,7 +82,7 @@ public class GDSemanticModel : IGDMemberAccessAnalyzer, IGDArgumentTypeAnalyzer
     private readonly GDValidationContext? _validationContext;
 
     private readonly GDSymbolRegistry _symbolRegistry = new();
-    private readonly GDFlowAnalysisRegistry _flowRegistry = new();
+    private readonly GDFlowAnalysisRegistry _flowRegistry;
 
     private readonly GDMemberResolver _memberResolver;
     private readonly GDContainerTypeService _containerTypeService;
@@ -193,6 +193,7 @@ public class GDSemanticModel : IGDMemberAccessAnalyzer, IGDArgumentTypeAnalyzer
         _runtimeProvider = runtimeProvider;
         _validationContext = validationContext;
         _typeEngine = typeEngine;
+        _flowRegistry = new GDFlowAnalysisRegistry();
 
         _memberResolver = new GDMemberResolver(runtimeProvider);
         _containerTypeService = new GDContainerTypeService(runtimeProvider);
@@ -280,7 +281,8 @@ public class GDSemanticModel : IGDMemberAccessAnalyzer, IGDArgumentTypeAnalyzer
         if (scriptFile == null)
             throw new ArgumentNullException(nameof(scriptFile));
 
-        var collector = new GDSemanticReferenceCollector(scriptFile, runtimeProvider, typeInjector, callSiteRegistry);
+        var collector = new GDSemanticReferenceCollector(
+            scriptFile, runtimeProvider, typeInjector, callSiteRegistry);
         return collector.BuildSemanticModel();
     }
 

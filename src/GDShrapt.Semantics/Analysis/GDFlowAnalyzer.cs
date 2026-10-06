@@ -17,6 +17,8 @@ internal class GDFlowAnalyzer : GDVisitor
     private readonly IGDExpressionTypeProvider? _typeProvider;
     private readonly GDTypeInferenceEngine? _typeEngineForContainers;
     private readonly Func<IEnumerable<string>>? _onreadyVariablesProvider;
+    private const int MaxLoopAnalysisIterations = 10;
+    private bool _recordStates = true;
     private readonly Stack<GDFlowState> _stateStack = new();
     private readonly Stack<List<GDFlowState>> _branchStatesStack = new();
     private readonly Stack<GDExpression?> _matchSubjectStack = new();
@@ -48,6 +50,7 @@ internal class GDFlowAnalyzer : GDVisitor
 
     // File path for origin tracking
     private string? _filePath;
+    private readonly Dictionary<(GDTypeOriginKind Kind, GDNode? Node, GDTypeOriginConfidence Confidence, string? Description, GDAbstractValue? Value), GDTypeOrigin> _originCache = new();
 
     // Coroutine detection: set to true when an await expression is encountered
     private bool _hasAwait;
@@ -81,7 +84,13 @@ internal class GDFlowAnalyzer : GDVisitor
 
     private GDTypeOrigin CreateOrigin(GDTypeOriginKind kind, GDNode? node, GDTypeOriginConfidence confidence = GDTypeOriginConfidence.Inferred, string? description = null, GDAbstractValue? value = null)
     {
-        return new GDTypeOrigin(kind, confidence, LocationFromNode(node), description: description, value: value);
+        var key = (kind, node, confidence, description, value);
+        if (_originCache.TryGetValue(key, out var existing))
+            return existing;
+
+        var origin = new GDTypeOrigin(kind, confidence, LocationFromNode(node), description: description, value: value);
+        _originCache.Add(key, origin);
+        return origin;
     }
 
     /// <summary>
@@ -778,6 +787,23 @@ internal class GDFlowAnalyzer : GDVisitor
         if (expr == null)
             return null;
 
+        if (expr is GDIdentifierExpression identifierExpr)
+        {
+            var variableName = identifierExpr.Identifier?.Sequence;
+            var flowVariable = string.IsNullOrEmpty(variableName)
+                ? null
+                : _currentState.GetVariableType(variableName);
+            if (flowVariable != null)
+            {
+                if (flowVariable.IsNarrowed && flowVariable.NarrowedFromType != null)
+                    return flowVariable.NarrowedFromType;
+                if (!flowVariable.CurrentType.IsEmpty)
+                    return flowVariable.CurrentType.ToSemanticType();
+                if (flowVariable.DeclaredType != null && !flowVariable.DeclaredType.IsVariant)
+                    return flowVariable.DeclaredType;
+            }
+        }
+
         if (_resolvingExpressions.Contains(expr))
             return null;
 
@@ -997,17 +1023,18 @@ internal class GDFlowAnalyzer : GDVisitor
 
     #region For/While Loops
 
-    // Track loop body states for fixed-point iteration
+    // Track loop-entry state and iterator metadata during fixed-point body passes.
     private readonly Stack<LoopAnalysisContext> _loopContextStack = new();
 
     private class LoopAnalysisContext
     {
         public GDFlowState PreLoopState { get; set; } = GDFlowState.Empty;
-        public GDFlowState? CurrentIterationState { get; set; }
-        public int IterationCount { get; set; }
-        public Dictionary<string, HashSet<string>>? PreviousSnapshot { get; set; }
         public string? IteratorName { get; set; }
         public string? IteratorType { get; set; }
+        public GDForStatement? ForStatement { get; set; }
+        public GDWhileStatement? WhileStatement { get; set; }
+        public List<GDFlowState> BreakStates { get; } = new();
+        public List<GDFlowState> ContinueStates { get; } = new();
     }
 
     public override void Visit(GDForStatement forStmt)
@@ -1016,11 +1043,11 @@ internal class GDFlowAnalyzer : GDVisitor
         var preLoopState = _currentState;
         _stateStack.Push(preLoopState);
 
-        // Create context for fixed-point iteration
+        // Save the pre-loop state for the zero-iteration exit path.
         var context = new LoopAnalysisContext
         {
             PreLoopState = preLoopState,
-            IterationCount = 0
+            ForStatement = forStmt
         };
 
         // Declare iterator variable with type from annotation or inferred from collection
@@ -1048,32 +1075,25 @@ internal class GDFlowAnalyzer : GDVisitor
 
         _loopContextStack.Push(context);
 
-        // Create initial loop body state
-        var loopState = preLoopState.CreateChild();
-        if (!string.IsNullOrEmpty(context.IteratorName))
-        {
-            var iterSemType = GDSemanticType.FromRuntimeTypeName(context.IteratorType);
-            var iterOrigin = CreateOrigin(GDTypeOriginKind.ForLoopIterator, forStmt);
-            loopState.DeclareVariable(context.IteratorName, null, iterSemType, null, iterOrigin);
-        }
-
-        _currentState = loopState;
+        _currentState = CreateLoopBodyState(context, preLoopState);
         RecordState(forStmt);
     }
 
     public override void Left(GDForStatement forStmt)
     {
         var parentState = _stateStack.Count > 0 ? _stateStack.Pop() : _currentState;
-        var context = _loopContextStack.Count > 0 ? _loopContextStack.Pop() : null;
+        var context = _loopContextStack.Count > 0 ? _loopContextStack.Peek() : null;
 
         if (context != null)
         {
-            // Perform fixed-point iteration to stabilize loop types
-            _currentState = GDLoopFlowHelper.ComputeLoopFixedPoint(
-                context.PreLoopState,
-                _currentState,
-                context.IteratorName,
-                context.IteratorType);
+            try
+            {
+                _currentState = AnalyzeLoopFixedPoint(context, forStmt.Statements, _currentState);
+            }
+            finally
+            {
+                _loopContextStack.Pop();
+            }
         }
         else
         {
@@ -1090,37 +1110,33 @@ internal class GDFlowAnalyzer : GDVisitor
         var preLoopState = _currentState;
         _stateStack.Push(preLoopState);
 
-        // Create context for fixed-point iteration
+        // Save the pre-loop state for the zero-iteration exit path.
         var context = new LoopAnalysisContext
         {
             PreLoopState = preLoopState,
-            IterationCount = 0
+            WhileStatement = whileStmt
         };
         _loopContextStack.Push(context);
 
-        // Create child state for loop body
-        var loopState = preLoopState.CreateChild();
-
-        // Apply narrowing from condition (e.g., while x is Player:)
-        ApplyNarrowingFromCondition(whileStmt.Condition, loopState);
-
-        _currentState = loopState;
+        _currentState = CreateLoopBodyState(context, preLoopState);
         RecordState(whileStmt);
     }
 
     public override void Left(GDWhileStatement whileStmt)
     {
         var parentState = _stateStack.Count > 0 ? _stateStack.Pop() : _currentState;
-        var context = _loopContextStack.Count > 0 ? _loopContextStack.Pop() : null;
+        var context = _loopContextStack.Count > 0 ? _loopContextStack.Peek() : null;
 
         if (context != null)
         {
-            // Perform fixed-point iteration to stabilize loop types
-            _currentState = GDLoopFlowHelper.ComputeLoopFixedPoint(
-                context.PreLoopState,
-                _currentState,
-                null,
-                null);
+            try
+            {
+                _currentState = AnalyzeLoopFixedPoint(context, whileStmt.Statements, _currentState);
+            }
+            finally
+            {
+                _loopContextStack.Pop();
+            }
         }
         else
         {
@@ -1132,6 +1148,86 @@ internal class GDFlowAnalyzer : GDVisitor
     }
 
     #endregion
+
+    private GDFlowState CreateLoopBodyState(LoopAnalysisContext context, GDFlowState loopEntryState)
+    {
+        var bodyState = loopEntryState.CreateChild();
+        if (context.ForStatement != null && !string.IsNullOrEmpty(context.IteratorName))
+        {
+            var iteratorType = GDSemanticType.FromRuntimeTypeName(context.IteratorType);
+            var iteratorOrigin = CreateOrigin(GDTypeOriginKind.ForLoopIterator, context.ForStatement);
+            bodyState.DeclareVariable(context.IteratorName, null, iteratorType, null, iteratorOrigin);
+        }
+
+        if (context.WhileStatement != null)
+            ApplyNarrowingFromCondition(context.WhileStatement.Condition, bodyState);
+
+        return bodyState;
+    }
+
+    private GDFlowState AnalyzeLoopFixedPoint(
+        LoopAnalysisContext context,
+        GDStatementsList body,
+        GDFlowState firstBodyState)
+    {
+        var loopEntryState = GDLoopFlowHelper.MergeLoopBackEdge(
+            context.PreLoopState, firstBodyState, context.ContinueStates);
+        var exitState = GDLoopFlowHelper.MergeLoopExit(
+            context.PreLoopState, firstBodyState, context.BreakStates, context.ContinueStates);
+        var previousEntrySnapshot = loopEntryState.GetTypeSnapshot();
+        var previousExitSnapshot = exitState.GetTypeSnapshot();
+        var bodyPassCount = 1;
+
+        while (bodyPassCount < MaxLoopAnalysisIterations)
+        {
+            context.BreakStates.Clear();
+            context.ContinueStates.Clear();
+            var iterationEntry = CreateLoopBodyState(context, loopEntryState);
+            RunLoopBody(body, iterationEntry, recordStates: false);
+            var nextEntryState = GDLoopFlowHelper.MergeLoopBackEdge(
+                context.PreLoopState, _currentState, context.ContinueStates);
+            var nextExitState = GDLoopFlowHelper.MergeLoopExit(
+                context.PreLoopState, _currentState, context.BreakStates, context.ContinueStates);
+            var isStable = nextEntryState.MatchesSnapshot(previousEntrySnapshot)
+                && nextExitState.MatchesSnapshot(previousExitSnapshot);
+
+            loopEntryState = nextEntryState;
+            exitState = nextExitState;
+            previousEntrySnapshot = loopEntryState.GetTypeSnapshot();
+            previousExitSnapshot = exitState.GetTypeSnapshot();
+            bodyPassCount++;
+
+            if (isStable)
+                break;
+        }
+
+        if (bodyPassCount > 1)
+        {
+            // Materialize locations only for the final loop-entry types.
+            context.BreakStates.Clear();
+            context.ContinueStates.Clear();
+            RunLoopBody(body, CreateLoopBodyState(context, loopEntryState), recordStates: true);
+            exitState = GDLoopFlowHelper.MergeLoopExit(
+                context.PreLoopState, _currentState, context.BreakStates, context.ContinueStates);
+        }
+
+        return exitState;
+    }
+
+    private void RunLoopBody(GDStatementsList body, GDFlowState entryState, bool recordStates)
+    {
+        var previousRecordStates = _recordStates;
+        _recordStates = recordStates && previousRecordStates;
+        _currentState = entryState;
+        try
+        {
+            body.WalkIn(this);
+        }
+        finally
+        {
+            _recordStates = previousRecordStates;
+        }
+    }
 
     #region Match Statements
 
@@ -1328,6 +1424,9 @@ internal class GDFlowAnalyzer : GDVisitor
 
     public override void Visit(GDBreakExpression breakExpr)
     {
+        if (_loopContextStack.Count > 0)
+            _loopContextStack.Peek().BreakStates.Add(_currentState.Clone());
+
         // Mark current state as terminated by break
         _currentState.MarkTerminated(TerminationType.Break);
         RecordState(breakExpr);
@@ -1335,6 +1434,9 @@ internal class GDFlowAnalyzer : GDVisitor
 
     public override void Visit(GDContinueExpression continueExpr)
     {
+        if (_loopContextStack.Count > 0)
+            _loopContextStack.Peek().ContinueStates.Add(_currentState.Clone());
+
         // Mark current state as terminated by continue
         _currentState.MarkTerminated(TerminationType.Continue);
         RecordState(continueExpr);
@@ -1977,6 +2079,9 @@ internal class GDFlowAnalyzer : GDVisitor
 
     private void RecordState(GDNode node)
     {
+        if (!_recordStates)
+            return;
+
         // Clone the current state to create an immutable snapshot
         // This ensures that subsequent mutations to _currentState don't affect recorded states
         _nodeStates[node] = _currentState.Clone();

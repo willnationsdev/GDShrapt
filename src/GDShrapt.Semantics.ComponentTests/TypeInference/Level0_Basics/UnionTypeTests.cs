@@ -206,6 +206,64 @@ public class UnionTypeTests
         Assert.AreEqual(1, union1.Types.Count);
     }
 
+    [TestMethod]
+    public void UnionType_MergeWith_RepeatedOrigin_DoesNotDuplicateProvenance()
+    {
+        var type = GDSemanticType.FromRuntimeTypeName("Player");
+        var origin = new GDTypeOrigin(
+            GDTypeOriginKind.Assignment,
+            GDTypeOriginConfidence.Inferred,
+            new GDFlowLocation("test.gd", 1, 0));
+        var source = new GDUnionType();
+        source.AddType(type, origin);
+        source.AddType(type, origin);
+        var merged = new GDUnionType();
+
+        for (var i = 0; i < 100; i++)
+            merged.MergeWith(source);
+
+        Assert.AreEqual(1, merged.GetOrigins(type).Count);
+        Assert.AreSame(origin, merged.GetOrigins(type)[0]);
+    }
+
+    [TestMethod]
+    public void UnionType_MergeWith_DistinctOrigins_PreservesBoth()
+    {
+        var type = GDSemanticType.FromRuntimeTypeName("Player");
+        var firstOrigin = new GDTypeOrigin(
+            GDTypeOriginKind.Assignment,
+            GDTypeOriginConfidence.Inferred,
+            new GDFlowLocation("test.gd", 1, 0));
+        var secondOrigin = new GDTypeOrigin(
+            GDTypeOriginKind.Assignment,
+            GDTypeOriginConfidence.Inferred,
+            new GDFlowLocation("test.gd", 2, 0));
+        var first = new GDUnionType();
+        first.AddType(type, firstOrigin);
+        var second = new GDUnionType();
+        second.AddType(type, secondOrigin);
+
+        first.MergeWith(second);
+
+        Assert.AreEqual(2, first.GetOrigins(type).Count);
+        Assert.AreSame(firstOrigin, first.GetOrigins(type)[0]);
+        Assert.AreSame(secondOrigin, first.GetOrigins(type)[1]);
+    }
+
+    [TestMethod]
+    public void UnionType_AddType_FlattensSemanticUnion()
+    {
+        var intType = GDSemanticType.FromRuntimeTypeName("int");
+        var stringType = GDSemanticType.FromRuntimeTypeName("String");
+        var union = new GDUnionType();
+
+        union.AddType(new GDUnionSemanticType(new[] { intType, stringType }));
+
+        Assert.AreEqual(2, union.Types.Count);
+        Assert.IsTrue(union.Types.Contains(intType));
+        Assert.IsTrue(union.Types.Contains(stringType));
+    }
+
     #endregion
 
     #region Intersect Tests

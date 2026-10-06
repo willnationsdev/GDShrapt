@@ -685,7 +685,10 @@ public class GDProjectSemanticModel : IDisposable
         if (scriptFile.SemanticModel == null)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            scriptFile.Analyze(RuntimeProvider, _project.CreateNodeTypeInjector(), _project.CallSiteRegistry);
+            scriptFile.Analyze(
+                RuntimeProvider,
+                _project.CreateNodeTypeInjector(),
+                _project.CallSiteRegistry);
             sw.Stop();
             if (sw.ElapsedMilliseconds > 100)
             {

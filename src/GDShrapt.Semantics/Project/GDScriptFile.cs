@@ -206,7 +206,10 @@ public class GDScriptFile : IGDScriptInfo
     /// </summary>
     /// <param name="runtimeProvider">Runtime provider for type resolution.</param>
     /// <param name="typeInjector">Optional type injector for scene-based node type inference.</param>
-    public void Analyze(IGDRuntimeProvider? runtimeProvider = null, IGDRuntimeTypeInjector? typeInjector = null, GDCallSiteRegistry? callSiteRegistry = null)
+    public void Analyze(
+        IGDRuntimeProvider? runtimeProvider = null,
+        IGDRuntimeTypeInjector? typeInjector = null,
+        GDCallSiteRegistry? callSiteRegistry = null)
     {
         if (Class == null)
             return;
