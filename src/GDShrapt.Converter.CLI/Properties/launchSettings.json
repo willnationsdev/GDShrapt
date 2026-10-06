@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "GDShrapt.Converter.CLI": {
+      "commandName": "Project"
+    },
+    "GDShrapt.Converter.CLI (-h)": {
+      "commandName": "Project",
+      "commandLineArgs": "-h"
+    },
+    "GDShrapt.Converter.CLI (analyze addons/guideCS/guide)": {
+      "commandName": "Project",
+      "commandLineArgs": "analyze addons/guideCS/guide",
+      "workingDirectory": "E:\\source\\repos\\gamedev\\EchoSoul\\game\\client"
+    }
+  }
+}

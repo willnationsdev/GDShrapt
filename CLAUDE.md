@@ -19,6 +19,7 @@ GDShrapt.Abstractions (interfaces)
        └── GDShrapt.Semantics   - Semantic analysis
               ├── GDShrapt.Semantics.Validator - Type-based validation using semantics
               ├── GDShrapt.CLI.Core → GDShrapt.CLI
+              ├── GDShrapt.Converter - Batch project analysis and rule-based conversion API (.NET 10)
               ├── GDShrapt.LSP
               └── GDShrapt.Plugin
 
@@ -140,6 +141,12 @@ Solution: `src/GDShrapt.sln`. Tests use MSTest with FluentAssertions.
 - `parse` - AST debug output
 - `extract-style` - Detect formatting style
 - Output formats: `GDTextFormatter`, `GDJsonFormatter`
+
+**Converter** - Standalone batch analysis and conversion
+- `GDConversionAnalyzer` loads all project scripts before cross-file semantic analysis; no editor/plugin or file watcher is used
+- `GDConversionAnalysis` owns the analyzed `GDScriptProject` and must be disposed
+- `IGDConversionRule`, `GDConversionRuleSet`, and `GDConversionService` provide deterministic priority-based planning and guarded output writing
+- `GDShrapt.Converter.CLI analyze` writes a JSON project artifact; `convert` consumes the rule pipeline
 
 **LSP** - Language Server Protocol 3.17
 - `GDLanguageServer` - Main server: `InitializeAsync()`, `RunAsync()`

@@ -324,13 +324,36 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
         var compositeProvider = CreateRuntimeProvider();
         var nodeTypeInjector = CreateNodeTypeInjector();
 
+        var scripts = _scripts.Values;
+        var total = scripts.Count;
+        var completed = 0;
+        var progressStartingCallback = _options?.ProgressStarting;
+        var progressItemStartCallback = _options?.ItemProgressStart;
+        var progressItemEndCallback = _options?.ItemProgressEnd;
+
+        int ReportScriptProgressStart(string path)
+        {
+            var count = Interlocked.Increment(ref completed);
+            progressItemStartCallback?.Invoke(new(count, total, path));
+            return count;
+        }
+
+        void ReportScriptProgress(string path, int current)
+        {
+            progressItemEndCallback?.Invoke(new(current, total, path));
+        }
+
+        progressStartingCallback?.Invoke(total);
+
         // Sequential fallback when parallel is disabled or degree is 0
         if (!config.EnableParallelAnalysis || config.MaxDegreeOfParallelism == 0)
         {
-            foreach (var script in _scripts.Values)
+            foreach (var script in scripts)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var idx = ReportScriptProgressStart(script.FullPath ?? "");
                 script.Analyze(compositeProvider, nodeTypeInjector);
+                ReportScriptProgress(script.FullPath ?? "", idx);
             }
 
             // Invalidate autoloads cache so subsequent queries pick up flow-inferred types
@@ -351,14 +374,20 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
         {
             Parallel.ForEach(_scripts.Values, options, script =>
             {
+                int idx = 0;
                 try
                 {
+                    idx = ReportScriptProgressStart(script.FullPath ?? "");
                     script.Analyze(compositeProvider, nodeTypeInjector);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     exceptions.Add(ex);
                     _logger.Error($"Error analyzing {script.FullPath}: {ex.Message}");
+                }
+                finally
+                {
+                    ReportScriptProgress(script.FullPath ?? "", idx);
                 }
             });
         }
@@ -1022,4 +1051,21 @@ public class GDScriptProjectOptions
     /// If null, uses defaults from GDSemanticsConfig.
     /// </summary>
     public GDSemanticsConfig? SemanticsConfig { get; set; }
+
+    /// <summary>
+    /// An optional callback invoked to setup progress UI for the analyzing process.
+    /// </summary>
+    public Action<int>? ProgressStarting { get; set; }
+
+    /// <summary>
+    /// An optional callback invoked to iterate progress UI for the analyzing process, marking the start of a new item.
+    /// </summary>
+    public Action<AnalysisProgress>? ItemProgressStart { get; set; }
+
+    /// <summary>
+    /// An optional callback invoked to iterate progress UI for the analyzing process, marking the completion of an item.
+    /// </summary>
+    public Action<AnalysisProgress>? ItemProgressEnd { get; set; }
 }
+
+public readonly record struct AnalysisProgress(int CompletedFiles, int TotalFiles, string? CurrentFile);
