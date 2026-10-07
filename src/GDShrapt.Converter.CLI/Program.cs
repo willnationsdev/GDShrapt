@@ -86,36 +86,44 @@ public class BasicCommands
     }
 
     /// <summary>
-    ///
+    /// Plans syntax conversions and writes mapped type declarations when the plan is complete.
     /// </summary>
     /// <param name="path">The project directory or a directory inside the project.</param>
-    /// <param name="output">The output folder for generated, converted C# files.</param>
-    /// <param name="dryRun">Print planned outputs without writing files.</param>
-    public async Task Convert([Argument] string path, [Argument] string output, bool dryRun)
+    /// <param name="outputPath">The output directory for generated C# files, relative to the Godot project directory when not rooted.</param>
+    /// <param name="dryRun">Report planned files without writing them.</param>
+    public async Task Convert([Argument] string path, [Argument] string outputPath, bool dryRun)
     {
         var projectRoot = GDProjectLoader.FindProjectRoot(path) ?? Path.GetFullPath(path);
         using var analysis = await GDConversionAnalyzer.AnalyzeAsync(path, CreateDefaultAnalysisOptions(projectRoot, path));
+        var resolvedOutputPath = Path.GetFullPath(outputPath, analysis.Project.ProjectPath);
         var conversionService = new GDConversionService();
         var plan = conversionService.CreatePlan(analysis, GDConversionRuleSet.Empty);
 
         Console.WriteLine($"Analyzed {analysis.Scripts.Count} scripts.");
+        foreach (var entry in plan.Entries)
+        {
+            var converted = entry.Mappings.Count(mapping => mapping.Result.Disposition == GDConversionNodeDisposition.Converted);
+            var ignored = entry.Mappings.Count(mapping => mapping.Result.Disposition == GDConversionNodeDisposition.Ignored);
+            var unmapped = entry.UnmappedNodes.Count();
+            Console.WriteLine($"{entry.SourcePath}: converted={converted}, ignored={ignored}, unmapped={unmapped}");
+        }
+
+        if (!plan.IsComplete)
+        {
+            var message = $"Conversion plan is incomplete: {plan.UnmappedNodes.Count()} syntax elements are unmapped.";
+            if (!dryRun)
+                throw new InvalidOperationException(message);
+            Console.WriteLine(message);
+            return;
+        }
+
+        foreach (var file in plan.Files)
+            Console.WriteLine(Path.GetFullPath(Path.Combine(resolvedOutputPath, file.OutputPath)));
+
         if (dryRun)
-        {
-            foreach (var entry in plan.Entries.Where(entry => entry.MatchingRules.Count > 1))
-            {
-                Console.WriteLine($"{entry.SourcePath}: selected '{entry.SelectedRule}' from {string.Join(", ", entry.MatchingRules)}");
-            }
+            return;
 
-            foreach (var generated in plan.Outputs)
-                Console.WriteLine(Path.GetFullPath(Path.Combine(output, generated.RelativePath)));
-        }
-        else
-        {
-            conversionService.WriteOutputs(plan, output);
-            Console.WriteLine($"Wrote {plan.Outputs.Count()} generated files to {Path.GetFullPath(output)}.");
-        }
-
-        if (plan.Outputs.Count() == 0)
-            Console.WriteLine("No conversion rules produced output. Register IGDConversionRule implementations to enable conversion.");
+        conversionService.WriteOutputs(plan, resolvedOutputPath);
+        Console.WriteLine($"Wrote {plan.Files.Count} generated C# files to {resolvedOutputPath}.");
     }
 }

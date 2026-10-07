@@ -1,8 +1,8 @@
 namespace GDShrapt.Converter.Planning;
 
 /// <summary>
-/// Ordered conversion rules. Higher priority rules are considered first; registration
-/// order breaks ties deterministically.
+/// Ordered AST conversion rules. Higher priority rules are considered first;
+/// registration order breaks ties deterministically.
 /// </summary>
 public sealed class GDConversionRuleSet
 {

@@ -145,7 +145,9 @@ Solution: `src/GDShrapt.sln`. Tests use MSTest with FluentAssertions.
 **Converter** - Standalone batch analysis and conversion
 - `GDConversionAnalyzer` loads all project scripts before cross-file semantic analysis; no editor/plugin or file watcher is used
 - `GDConversionAnalysis` owns the analyzed `GDScriptProject` and must be disposed
-- `IGDConversionRule`, `GDConversionRuleSet`, and `GDConversionService` provide deterministic priority-based planning and guarded output writing
+- `IGDConversionRule` and `GDConversionRuleSet` apply prioritized strategies to every AST node and terminal token; each result is C# syntax or an explicit ignore, while unmatched syntax remains visible in `GDConversionPlan`
+- `GDConversionService.CreatePlan` applies prioritized conversion rules to every AST node and terminal token; `GDConversionDestination` routes and orders mapped declarations, and a complete plan contains resolved C# declaration files for `WriteOutputs`
+- `GDConversionNodeContext` exposes the node, parent, semantic model, and flow-state queries so rules can make narrowly-scoped decisions without rescanning a whole class
 - `GDShrapt.Converter.CLI analyze` writes a JSON project artifact; `convert` consumes the rule pipeline
 
 **LSP** - Language Server Protocol 3.17
