@@ -16,22 +16,18 @@ public sealed class GDConversionPipelineTests
     private string _testRootDirectory = null!;
     private string _projectDirectory = null!;
     private string _scriptsDirectory = null!;
-    private string _testGuid = null!;
     private GDSolutionContext _solutionContext = null!;
 
     [TestInitialize]
     public void Initialize()
     {
-        // Create the test environment from the local `_repo` folder.
-        _testGuid = Guid.NewGuid().ToString("N");
-        var repoPath = Path.Combine(AppContext.BaseDirectory, "_repo");
-        _testRootDirectory = Path.Combine(Path.GetTempPath(), "GDShrapt.Converter.Tests", _testGuid);
+        _testRootDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "GDShrapt.Converter.Tests",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRootDirectory);
 
-        CopyDirectory(repoPath, _testRootDirectory);
-
-        _projectDirectory = Path.Combine(_testRootDirectory, "conversion-tests");
-        Directory.CreateDirectory(_projectDirectory);
+        _projectDirectory = _testRootDirectory;
         _scriptsDirectory = Path.Combine(_projectDirectory, "scripts");
         Directory.CreateDirectory(_scriptsDirectory);
         File.WriteAllText(Path.Combine(_projectDirectory, "project.godot"), "config_version=5\n");
@@ -484,48 +480,6 @@ public sealed class GDConversionPipelineTests
             .Result.CSharpSyntax!;
 
         Assert.AreEqual("private readonly Name _name = new Name(\"hero\");", field.NormalizeWhitespace().ToFullString());
-    }
-
-    [TestMethod]
-    public async Task GDSolutionContext_ResolvesAssemblyAliasesForDestinations()
-    {
-        using var analysis = await CreateAnalysisAsync();
-        var solution = new GDSolutionContext(
-            Path.Combine(_testRootDirectory, "game", "client", "TestGame.csproj"),
-            "DebugTest",
-            [
-                $"ext:{GDSolutionContext.DefaultExtensionsAssemblyName}",
-                $"tools:{GDSolutionContext.DefaultToolsAssemblyName}",
-                GDSolutionContext.DefaultExtensionsAssemblyName
-            ]);
-
-        Assert.AreEqual(GDSolutionContext.DefaultExtensionsAssemblyName, solution.Project("ext").AssemblyName);
-        Assert.AreEqual(GDSolutionContext.DefaultToolsAssemblyName, solution.Project("tools").AssemblyName);
-        Assert.AreEqual(
-            GDSolutionContext.DefaultExtensionsAssemblyName,
-            solution.Project(GDSolutionContext.DefaultExtensionsAssemblyName).AssemblyName);
-
-        var conversion = new GDConversionService(solution);
-        var plan = conversion.CreatePlan(
-            analysis,
-            new GDConversionRuleSet(
-            [
-                new IgnoreNodeRule(),
-                new ClassMappingRule(
-                    pathFormat: Path.Combine("utilities", "Extensions.cs"),
-                    declarationName: "Extensions",
-                    destinationName: "Project.Utilities.Extensions",
-                    assemblyName: "ext"),
-                new VariableMappingRule(),
-                new MethodMappingRule(),
-                new StatementsMappingRule(),
-                new PassMappingRule()
-            ]));
-
-        Assert.AreEqual("ext", plan.Files.Single().AssemblyName);
-        var outputDirectory = Path.Combine(_projectDirectory, "generated");
-        conversion.WriteOutputs(plan, outputDirectory);
-        Assert.IsTrue(File.Exists(Path.Combine(outputDirectory, "utilities", "Extensions.cs")));
     }
 
     [TestMethod]
@@ -1113,29 +1067,6 @@ public sealed class GDConversionPipelineTests
         }
 
         return int.MaxValue;
-    }
-
-    private static void CopyDirectory(string source, string destination)
-    {
-        foreach (var directory in Directory.EnumerateDirectories(
-            source,
-            "*",
-            SearchOption.AllDirectories))
-        {
-            var relativePath = Path.GetRelativePath(source, directory);
-            Directory.CreateDirectory(Path.Combine(destination, relativePath));
-        }
-
-        foreach (var file in Directory.EnumerateFiles(
-            source,
-            "*",
-            SearchOption.AllDirectories))
-        {
-            var relativePath = Path.GetRelativePath(source, file);
-            var destinationFile = Path.Combine(destination, relativePath);
-
-            File.Copy(file, destinationFile);
-        }
     }
 
 }

@@ -19,12 +19,8 @@
   </ItemGroup>
 
   <Target Name="RefreshConverterTestRepo" BeforeTargets="VSTest">
-    <RemoveDir Directories="$(OutDir)_repo" />
     <MakeDir Directories="$(OutDir)_repo" />
-    <Copy
-      SourceFiles="@(ConverterTestRepoFile)"
-      DestinationFiles="@(ConverterTestRepoFile->'$(OutDir)_repo\%(RecursiveDir)%(Filename)%(Extension)')"
-      SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(ConverterTestRepoFile)" DestinationFiles="@(ConverterTestRepoFile->'$(OutDir)_repo\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
   <ItemGroup>
