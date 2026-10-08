@@ -1,0 +1,12 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DefineConstants>$(DefineConstants);TOOLS</DefineConstants>
+    <Configurations>Debug;Release;DebugTest</Configurations>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="GodotSharpEditor" Version="$(GodotVersion)" />
+  </ItemGroup>
+
+</Project>

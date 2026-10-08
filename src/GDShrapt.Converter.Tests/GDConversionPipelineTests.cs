@@ -6,47 +6,36 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Diagnostics;
 
 namespace GDShrapt.Converter.Tests;
 
 [TestClass]
 public sealed class GDConversionPipelineTests
 {
+    private string _testRootDirectory = null!;
     private string _projectDirectory = null!;
+    private string _testGuid = null!;
     private GDSolutionContext _solutionContext = null!;
 
     [TestInitialize]
     public void Initialize()
     {
-        _projectDirectory = Path.Combine(Path.GetTempPath(), "GDShrapt.Converter.Tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_projectDirectory);
-        File.WriteAllText(Path.Combine(_projectDirectory, "alpha.gd"), "class_name Alpha\nextends RefCounted\nvar peer: Beta\nfunc ping():\n\tpass\n");
-        File.WriteAllText(Path.Combine(_projectDirectory, "beta.gd"), "class_name Beta\nextends RefCounted\nvar peer: Alpha\nfunc ping():\n\tpass\n");
-        File.WriteAllText(
-            Path.Combine(_projectDirectory, "GDShrapt.Tests.csproj"),
-            """
-            <Project Sdk="Microsoft.NET.Sdk">
-              <PropertyGroup>
-                <TargetFramework>net10.0</TargetFramework>
-              </PropertyGroup>
-            </Project>
-            """);
-        File.WriteAllText(
-            Path.Combine(_projectDirectory, ".editorconfig"),
-            """
-            root = true
+        // Create the test environment from the local `_repo` folder.
+        _testGuid = Guid.NewGuid().ToString("N");
+        var repoPath = Path.Combine(AppContext.BaseDirectory, "_repo");
+        _testRootDirectory = Path.Combine(Path.GetTempPath(), "GDShrapt.Converter.Tests", _testGuid);
+        Directory.CreateDirectory(_testRootDirectory);
 
-            [*.cs]
-            dotnet_naming_rule.private_fields_rule.symbols = private_fields
-            dotnet_naming_rule.private_fields_rule.style = private_style
-            dotnet_naming_symbols.private_fields.applicable_kinds = field
-            dotnet_naming_symbols.private_fields.applicable_accessibilities = private
-            dotnet_naming_style.private_style.capitalization = camel_case
-            dotnet_naming_style.private_style.required_prefix = _
-            """);
+        CopyDirectory(repoPath, _testRootDirectory);
+        ReplaceInFile(Path.Combine(_testRootDirectory, ".editorconfig"), "{test-guid}", _testGuid);
+
+        _projectDirectory = Path.Combine(_testRootDirectory, "game", "client");
+        // Create supplemental projects.
+
         _solutionContext = new GDSolutionContext(
             Path.Combine(_projectDirectory, "GDShrapt.Tests.csproj"),
-            "Testing");
+            "DebugTest");
     }
 
     [TestCleanup]
@@ -1015,5 +1004,66 @@ public sealed class GDConversionPipelineTests
 
         public GDConversionNodeResult Convert(GDConversionNodeContext context)
             => GDConversionNodeResult.Converted(SyntaxFactory.EmptyStatement());
+    }
+
+    private static int Run(string cwd, string program, params ReadOnlySpan<string> args)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            WorkingDirectory = cwd,
+            FileName = program,
+            RedirectStandardOutput = false,
+            RedirectStandardError = false,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using (var process = Process.Start(startInfo))
+        {
+            if (process != null)
+            {
+                process.WaitForExit();
+                return process.ExitCode;
+            }
+        }
+
+        return int.MaxValue;
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        foreach (var directory in Directory.EnumerateDirectories(
+            source,
+            "*",
+            SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(source, directory);
+            Directory.CreateDirectory(Path.Combine(destination, relativePath));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(
+            source,
+            "*",
+            SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(source, file);
+            var destinationFile = Path.Combine(destination, relativePath);
+
+            File.Copy(file, destinationFile);
+        }
+    }
+
+    private static void ReplaceInFile(
+        string path,
+        string search,
+        string replacement)
+    {
+        var contents = File.ReadAllText(path);
+        contents = contents.Replace(search, replacement);
+        File.WriteAllText(path, contents);
     }
 }

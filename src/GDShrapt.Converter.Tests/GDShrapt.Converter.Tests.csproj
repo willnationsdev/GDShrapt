@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -10,6 +10,14 @@
     <RootNamespace>GDShrapt.Converter.Tests</RootNamespace>
     <AssemblyName>GDShrapt.Converter.Tests</AssemblyName>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="_repo\**\*" />
+    <EmbeddedResource Remove="_repo\**\*" />
+    <None Include="_repo\**\*" />
+    <None Remove="_repo\**\bin\**" />
+    <None Remove="_repo\**\obj\**" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="$(TestSdkVersion)" />

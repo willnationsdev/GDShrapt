@@ -11,6 +11,9 @@ public sealed class GDSolutionContext : ISolutionContext
     private readonly Dictionary<string, ICsProjectContext> _projectsByAssembly = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IGDConversionFormatter> _formattersByAssembly = new(StringComparer.OrdinalIgnoreCase);
 
+    public const string DefaultExtensionsAssemblyName = "Godot.Extensions";
+    public const string DefaultToolsAssemblyName = "Godot.Extensions.Tools";
+
     public GDSolutionContext(string projectPath, string configuration = "Debug")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);

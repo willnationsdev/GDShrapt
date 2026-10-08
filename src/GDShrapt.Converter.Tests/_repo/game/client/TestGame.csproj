@@ -1,0 +1,8 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Features\Godot\Godot.Extensions\Godot.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\Features\Godot\Godot.Extensions.Tools\Godot.Extensions.Tools.csproj" />
+  </ItemGroup>
+
+</Project>
