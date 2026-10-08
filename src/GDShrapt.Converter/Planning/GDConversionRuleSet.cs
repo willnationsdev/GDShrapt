@@ -19,6 +19,6 @@ public sealed class GDConversionRuleSet
             .ToArray();
     }
 
-    public static GDConversionRuleSet Empty { get; } = new(Array.Empty<IGDConversionRule>());
+    public static GDConversionRuleSet Empty { get; } = new([]);
     public IReadOnlyList<IGDConversionRule> Rules => _rules;
 }

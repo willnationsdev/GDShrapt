@@ -91,12 +91,22 @@ public class BasicCommands
     /// <param name="path">The project directory or a directory inside the project.</param>
     /// <param name="outputPath">The output directory for generated C# files, relative to the Godot project directory when not rooted.</param>
     /// <param name="dryRun">Report planned files without writing them.</param>
-    public async Task Convert([Argument] string path, [Argument] string outputPath, bool dryRun)
+    /// <param name="configuration">The .NET build configuration whose project properties should be used.</param>
+    /// <param name="assemblies">Paths to C# projects to which conversions can be hoisted.</param>
+    public async Task Convert(
+        [Argument] string path,
+        [Argument] string outputPath,
+        bool dryRun,
+        string configuration = "Debug",
+        params string[] assemblies)
     {
         var projectRoot = GDProjectLoader.FindProjectRoot(path) ?? Path.GetFullPath(path);
         using var analysis = await GDConversionAnalyzer.AnalyzeAsync(path, CreateDefaultAnalysisOptions(projectRoot, path));
         var resolvedOutputPath = Path.GetFullPath(outputPath, analysis.Project.ProjectPath);
-        var conversionService = new GDConversionService();
+        var solutionContext = new GDSolutionContext(projectRoot, configuration);
+        var conversionService = new GDConversionService(solutionContext);
+        // TODO: create formatter object that reads .editorconfig and/or ReSharper settings (if present) to derive the expected conventions for naming, spacing, namespaces, etc. + the root namespace, implicit/global usings, root namespace.
+        var formatter = new DefaultGDConversionFormatter(new GDConversionFormattingOptions());
         var plan = conversionService.CreatePlan(analysis, GDConversionRuleSet.Empty);
 
         Console.WriteLine($"Analyzed {analysis.Scripts.Count} scripts.");

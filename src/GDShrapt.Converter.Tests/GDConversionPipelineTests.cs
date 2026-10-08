@@ -1,6 +1,9 @@
 using GDShrapt.Converter.Planning;
+using GDShrapt.Converter.Planning.Definitions;
+using GDShrapt.Abstractions;
 using GDShrapt.Reader;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -92,7 +95,7 @@ public sealed class GDConversionPipelineTests
             new PassMappingRule()
         ]);
 
-        var service = new GDConversionService();
+        var service = new GDConversionService(TestSolutionContext.Instance);
         var plan = service.CreatePlan(analysis, rules);
 
         Assert.IsTrue(plan.IsComplete);
@@ -122,11 +125,328 @@ public sealed class GDConversionPipelineTests
     }
 
     [TestMethod]
+    public async Task PrivateFieldRule_MapsUnderscoreFieldToTypedPrivateField()
+    {
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _health: int = 5\n");
+        using var analysis = await CreateAnalysisAsync();
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+            analysis,
+            new GDConversionRuleSet([new PrivateFieldRule(), new NumberMappingRule(), new IgnoreNodeRule()]));
+
+        var mapping = plan.Entries
+            .SelectMany(entry => entry.Mappings)
+            .Single(candidate => candidate.Node is GDVariableDeclaration { Identifier.Sequence: "_health" });
+
+        Assert.AreEqual("private-field", mapping.RuleName);
+        Assert.AreEqual("private readonly long _health = 5;", mapping.Result.CSharpSyntax!.ToString());
+    }
+
+    [TestMethod]
+    public async Task PrivateFieldRule_DoesNotMarkFieldReadonlyWhenItIsReassigned()
+    {
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _health: int = 5\nfunc update():\n\t_health = 7\n");
+        using var analysis = await CreateAnalysisAsync();
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+            analysis,
+            new GDConversionRuleSet([new PrivateFieldRule(), new NumberMappingRule(), new IgnoreNodeRule()]));
+
+        var mapping = plan.Entries
+            .SelectMany(entry => entry.Mappings)
+            .Single(candidate => candidate.Node is GDVariableDeclaration { Identifier.Sequence: "_health" });
+
+        Assert.AreEqual("private long _health = 5;", mapping.Result.CSharpSyntax!.ToString());
+    }
+
+    [TestMethod]
+    public async Task PrivateFieldRule_DoesNotMapAccessorBackedProperties()
+    {
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _health: int:\n\tget:\n\t\treturn 1\n");
+        using var analysis = await CreateAnalysisAsync();
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+            analysis,
+            new GDConversionRuleSet([new PrivateFieldRule(), new IgnoreNodeRule()]));
+
+        var mapping = plan.Entries
+            .SelectMany(entry => entry.Mappings)
+            .Single(candidate => candidate.Node is GDVariableDeclaration { Identifier.Sequence: "_health" });
+
+        Assert.AreEqual("fallback-ignore", mapping.RuleName);
+    }
+
+    [TestMethod]
+    public async Task PrivateFieldRule_UsesSelectedProjectsRealPrecision()
+    {
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _speed: float = 1\n");
+        using var analysis = await CreateAnalysisAsync();
+        var rules = new GDConversionRuleSet([new PrivateFieldRule(), new IgnoreNodeRule()]);
+
+        var singlePrecisionPlan = new GDConversionService(TestSolutionContext.WithDoublePrecision(false))
+            .CreatePlan(analysis, rules);
+        var doublePrecisionPlan = new GDConversionService(TestSolutionContext.WithDoublePrecision(true))
+            .CreatePlan(analysis, rules);
+        var singlePrecisionField = singlePrecisionPlan.Entries
+            .SelectMany(entry => entry.Mappings)
+            .Single(mapping => mapping.Node is GDVariableDeclaration { Identifier.Sequence: "_speed" });
+        var doublePrecisionField = doublePrecisionPlan.Entries
+            .SelectMany(entry => entry.Mappings)
+            .Single(mapping => mapping.Node is GDVariableDeclaration { Identifier.Sequence: "_speed" });
+
+        Assert.AreEqual(
+            "private readonly float _speed = 1.0f;",
+            singlePrecisionField.Result.CSharpSyntax!.NormalizeWhitespace().ToFullString());
+        Assert.AreEqual(
+            "private readonly double _speed = 1.0;",
+            doublePrecisionField.Result.CSharpSyntax!.NormalizeWhitespace().ToFullString());
+    }
+
+    [TestMethod]
+    public async Task PrivateFieldRule_TranslatesGodotConstructorInitializers()
+    {
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _position: Vector2 = Vector2(1, 2)\n");
+        using var analysis = await CreateAnalysisAsync();
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+            analysis,
+            new GDConversionRuleSet([new ClassMappingRule(), new PrivateFieldRule(), new IgnoreNodeRule()]));
+
+        var field = plan.Files
+            .SelectMany(file => file.Types)
+            .Single(plannedType => plannedType.Declaration.Identifier.ValueText == "Alpha")
+            .Declaration is TypeDeclarationSyntax type
+            ? type.Members.OfType<FieldDeclarationSyntax>().Single()
+            : throw new AssertFailedException("Expected a generated type declaration.");
+
+        Assert.AreEqual(
+            "private readonly Godot.Vector2 _position = new Godot.Vector2(1.0f, 2.0f);",
+            field.NormalizeWhitespace().ToFullString());
+    }
+
+    [TestMethod]
+    public async Task PrivateFieldRule_UsesPolicySelectedNativeRepresentationAtUseSite()
+    {
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _position: Vector2 = Vector2(1, 2)\n");
+        using var analysis = await CreateAnalysisAsync();
+        var plan = new GDConversionService(TestSolutionContext.Instance, new NativeVector2Policy()).CreatePlan(
+            analysis,
+            new GDConversionRuleSet([new PrivateFieldRule(), new IgnoreNodeRule()]));
+        var field = plan.Entries
+            .SelectMany(entry => entry.Mappings)
+            .Single(mapping => mapping.Node is GDVariableDeclaration { Identifier.Sequence: "_position" })
+            .Result.CSharpSyntax!;
+
+        Assert.AreEqual(
+            "private readonly System.Numerics.Vector2 _position = new System.Numerics.Vector2(1.0f, 2.0f);",
+            field.NormalizeWhitespace().ToFullString());
+    }
+
+    [TestMethod]
+    public async Task WriteOutputs_AdoptsNamespaceUsingContributionAndShortensTypeNames()
+    {
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _position: Vector2 = Vector2(1, 2)\nvar _positions: Array[Vector2] = [Vector2(1, 2)]\n");
+        using var analysis = await CreateAnalysisAsync();
+        var service = new GDConversionService(TestSolutionContext.Instance);
+        var plan = service.CreatePlan(
+            analysis,
+            new GDConversionRuleSet([new ClassMappingRule(), new PrivateFieldRule(), new IgnoreNodeRule()]));
+        Assert.IsTrue(plan.Files.SelectMany(file => file.Types)
+            .SelectMany(type => type.Contributions)
+            .SelectMany(mapping => mapping.Result.Contributions)
+            .OfType<GDConversionNamespaceUsingContribution>()
+            .Any(contribution => contribution.Namespace == "Godot"));
+        var outputDirectory = Path.Combine(_projectDirectory, "generated");
+
+        service.WriteOutputs(plan, outputDirectory);
+
+        var output = File.ReadAllText(Path.Combine(outputDirectory, "alpha.cs"));
+        StringAssert.Contains(output, "using Godot;");
+        StringAssert.Contains(output, "using Godot.Collections;");
+        StringAssert.Contains(output, "Vector2 _position = new Vector2(1.0f, 2.0f)");
+        StringAssert.Contains(output, "Array<Vector2> _positions = new Array<Vector2>");
+        Assert.IsFalse(output.Contains("Godot.Vector2", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task PrivateFieldRule_TranslatesGodotNewFactoryCalls()
+    {
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _resource: RefCounted = RefCounted.new()\n");
+        using var analysis = await CreateAnalysisAsync();
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+            analysis,
+            new GDConversionRuleSet([new PrivateFieldRule(), new IgnoreNodeRule()]));
+
+        var field = plan.Entries
+            .SelectMany(entry => entry.Mappings)
+            .Single(mapping => mapping.Node is GDVariableDeclaration { Identifier.Sequence: "_resource" })
+            .Result.CSharpSyntax!;
+
+        Assert.AreEqual(
+            "private readonly Godot.RefCounted _resource = new Godot.RefCounted();",
+            field.NormalizeWhitespace().ToFullString());
+    }
+
+    [TestMethod]
+    public async Task PrivateFieldRule_ContributesInitParameterAssignmentsToGeneratedConstructor()
+    {
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _health: int\nfunc _init(health: int):\n\t_health = health\n");
+        using var analysis = await CreateAnalysisAsync();
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+            analysis,
+            new GDConversionRuleSet([new ClassMappingRule(), new PrivateFieldRule(), new IgnoreNodeRule()]));
+
+        var declaration = (TypeDeclarationSyntax)plan.Files
+            .SelectMany(file => file.Types)
+            .Single(plannedType => plannedType.Declaration.Identifier.ValueText == "Alpha")
+            .Declaration;
+        var constructor = declaration.Members.OfType<ConstructorDeclarationSyntax>().Single();
+
+        Assert.AreEqual(
+            "public Alpha(long health)\n{\n    this._health = health;\n}",
+            constructor.NormalizeWhitespace(eol: "\n").ToFullString());
+    }
+
+    [TestMethod]
+    public async Task GDSolutionContext_LoadsConfigurationPropertiesAndFormattingConventions()
+    {
+        var projectFilePath = Path.Combine(_projectDirectory, "GodotGame.csproj");
+        File.WriteAllText(
+            projectFilePath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <AssemblyName>GodotGame</AssemblyName>
+                <RootNamespace>Example.Game</RootNamespace>
+                <Configurations>Debug;Release</Configurations>
+                <DefineConstants Condition="'$(Configuration)' == 'Release'">$(DefineConstants);GODOT_REAL_T_IS_DOUBLE</DefineConstants>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, ".editorconfig"),
+            """
+            root = true
+
+            [*.cs]
+            indent_style = tab
+            indent_size = 2
+            end_of_line = lf
+            csharp_style_namespace_declarations = file_scoped
+            dotnet_naming_rule.private_fields_rule.symbols = private_fields
+            dotnet_naming_rule.private_fields_rule.style = private_style
+            dotnet_naming_symbols.private_fields.applicable_kinds = field
+            dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+            dotnet_naming_style.private_style.capitalization = camel_case
+            dotnet_naming_style.private_style.required_prefix = _
+            dotnet_naming_rule.static_private_fields_rule.symbols = static_private_fields
+            dotnet_naming_rule.static_private_fields_rule.style = static_private_style
+            dotnet_naming_symbols.static_private_fields.applicable_kinds = field
+            dotnet_naming_symbols.static_private_fields.applicable_accessibilities = private
+            dotnet_naming_symbols.static_private_fields.required_modifiers = static
+            dotnet_naming_style.static_private_style.capitalization = pascal_case
+            dotnet_naming_style.static_private_style.required_prefix = m_
+            """);
+        File.WriteAllText(Path.Combine(_projectDirectory, ".gitattributes"), "*.cs eol=crlf\n*.gd eol=lf\n");
+        File.WriteAllText(Path.Combine(_projectDirectory, "GlobalUsings.cs"), "global using Godot;\nglobal using StringNameAlias = Godot.StringName;\n");
+
+        var solution = new GDSolutionContext(projectFilePath, "Release");
+
+        Assert.AreEqual("GodotGame", solution.DefaultProject.AssemblyName);
+        Assert.AreEqual("Example.Game", solution.DefaultProject.RootNamespace);
+        Assert.AreEqual("Release", solution.DefaultProject.Configuration);
+        Assert.IsTrue(solution.DefaultProject.SupportsDoublePrecision);
+        Assert.IsTrue(solution.DefaultProject.GlobalUsings.Contains("Godot"));
+        Assert.AreEqual("Godot.StringName", solution.DefaultProject.GlobalTypeAliases["StringNameAlias"]);
+        Assert.IsTrue(solution.DefaultFormatter.Options.UseTabIndent);
+        Assert.AreEqual(2, solution.DefaultFormatter.Options.IndentSize);
+        Assert.AreEqual("\n", solution.DefaultFormatter.Options.LineEnding);
+        Assert.IsTrue(solution.DefaultFormatter.Options.PreferFileScopedNamespaces);
+        Assert.AreEqual("_privateField", solution.DefaultFormatter.Name("private_field"));
+        Assert.AreEqual(
+            "m_PrivateField",
+            solution.DefaultFormatter.Name(
+                "private_field",
+                new GDConversionNamingContext(
+                    "field",
+                    "private",
+                    new HashSet<string>(["static"], StringComparer.OrdinalIgnoreCase))));
+        Assert.AreEqual(
+            "\r\n",
+            solution.DefaultFormatter.Options.GetLineEnding(Path.Combine(_projectDirectory, "Generated.cs")));
+        Assert.AreEqual(
+            "\n",
+            solution.DefaultFormatter.Options.GetLineEnding(Path.Combine(_projectDirectory, "Generated.gd")));
+
+        File.Delete(Path.Combine(_projectDirectory, "beta.gd"));
+        using var analysis = await CreateAnalysisAsync();
+        var conversion = new GDConversionService(solution);
+        var plan = conversion.CreatePlan(
+            analysis,
+            new GDConversionRuleSet(
+            [
+                new IgnoreNodeRule(),
+                new ClassMappingRule(
+                    pathFormat: "Generated.cs",
+                    declarationName: "Alpha",
+                    destinationName: "Example.Game.Alpha"),
+                new MethodMappingRule()
+            ]));
+        var outputDirectory = Path.Combine(_projectDirectory, "generated");
+        conversion.WriteOutputs(plan, outputDirectory);
+        var output = File.ReadAllText(Path.Combine(outputDirectory, "Generated.cs"));
+
+        StringAssert.Contains(output, "namespace Example.Game;");
+        StringAssert.Contains(output, "\tpublic void Ping();");
+        Assert.IsTrue(output.Contains("\r\n"));
+    }
+
+    [TestMethod]
+    public async Task GDSolutionContext_UsesGlobalAliasesForGodotTypes()
+    {
+        var projectFilePath = Path.Combine(_projectDirectory, "GodotGame.csproj");
+        File.WriteAllText(
+            projectFilePath,
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "GlobalUsings.cs"),
+            "global using Godot;\nglobal using Name = Godot.StringName;\n");
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar _name: StringName = &\"hero\"\n");
+        using var analysis = await CreateAnalysisAsync();
+        var plan = new GDConversionService(new GDSolutionContext(projectFilePath)).CreatePlan(
+            analysis,
+            new GDConversionRuleSet([new PrivateFieldRule(), new IgnoreNodeRule()]));
+        var field = plan.Entries
+            .SelectMany(entry => entry.Mappings)
+            .Single(mapping => mapping.Node is GDVariableDeclaration { Identifier.Sequence: "_name" })
+            .Result.CSharpSyntax!;
+
+        Assert.AreEqual("private readonly Name _name = new Name(\"hero\");", field.NormalizeWhitespace().ToFullString());
+    }
+
+    [TestMethod]
     public async Task CreatePlan_ReportsUnmappedSyntaxInsteadOfAssumingCoverage()
     {
         using var analysis = await CreateAnalysisAsync();
 
-        var plan = new GDConversionService().CreatePlan(analysis, GDConversionRuleSet.Empty);
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, GDConversionRuleSet.Empty);
 
         Assert.IsFalse(plan.IsComplete);
         Assert.IsTrue(plan.UnmappedNodes.Any());
@@ -144,7 +464,7 @@ public sealed class GDConversionPipelineTests
             new ImplicitClassMappingRule()
         ]);
 
-        var plan = new GDConversionService().CreatePlan(analysis, rules);
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, rules);
 
         Assert.IsTrue(plan.IsComplete);
         CollectionAssert.AreEquivalent(
@@ -171,7 +491,7 @@ public sealed class GDConversionPipelineTests
             new PassMappingRule()
         ]);
 
-        var plan = new GDConversionService().CreatePlan(analysis, rules);
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, rules);
 
         Assert.AreEqual(1, plan.Files.Count);
         Assert.IsTrue(plan.Files.All(file => file.OutputPath == Path.Combine("utilities", "Extensions.cs")));
@@ -195,7 +515,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService();
+        var service = new GDConversionService(TestSolutionContext.Instance);
         var plan = service.CreatePlan(analysis, rules);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
@@ -223,7 +543,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService();
+        var service = new GDConversionService(TestSolutionContext.Instance);
         var plan = service.CreatePlan(analysis, rules);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
@@ -248,7 +568,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService();
+        var service = new GDConversionService(TestSolutionContext.Instance);
         var plan = service.CreatePlan(analysis, rules);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
@@ -269,11 +589,11 @@ public sealed class GDConversionPipelineTests
     public async Task WriteOutputs_RejectsIncompletePlanBeforeWriting()
     {
         using var analysis = await CreateAnalysisAsync();
-        var plan = new GDConversionService().CreatePlan(analysis, GDConversionRuleSet.Empty);
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, GDConversionRuleSet.Empty);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
         Assert.ThrowsException<InvalidOperationException>(() =>
-            new GDConversionService().WriteOutputs(plan, outputDirectory));
+            new GDConversionService(TestSolutionContext.Instance).WriteOutputs(plan, outputDirectory));
         Assert.IsFalse(Directory.Exists(outputDirectory));
     }
 
@@ -293,7 +613,7 @@ public sealed class GDConversionPipelineTests
             new MethodMappingRule("UtilitiesExtensions", includeClassName: true, order: -10)
         ]);
 
-        var service = new GDConversionService();
+        var service = new GDConversionService(TestSolutionContext.Instance);
         var plan = service.CreatePlan(analysis, rules);
 
         Assert.IsTrue(plan.IsComplete);
@@ -330,7 +650,7 @@ public sealed class GDConversionPipelineTests
         ]);
 
         Assert.ThrowsException<InvalidOperationException>(() =>
-            new GDConversionService().CreatePlan(analysis, rules));
+            new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, rules));
     }
 
     [TestMethod]
@@ -346,7 +666,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService();
+        var service = new GDConversionService(TestSolutionContext.Instance);
         var plan = service.CreatePlan(analysis, rules);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
@@ -373,7 +693,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService();
+        var service = new GDConversionService(TestSolutionContext.Instance);
         var plan = service.CreatePlan(analysis, rules);
 
         service.WriteOutputs(plan, Path.Combine("addons", "guideCS"));
@@ -393,10 +713,10 @@ public sealed class GDConversionPipelineTests
         using var analysis = await GDConversionAnalyzer.AnalyzeAsync(
             projectRoot,
             new GDConversionAnalysisOptions { MaxDegreeOfParallelism = 1, EnrichCallSites = false });
-        var plan = new GDConversionService().CreatePlan(analysis, CreateCompleteRules(relativePath));
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, CreateCompleteRules(relativePath));
 
         Assert.ThrowsException<InvalidOperationException>(() =>
-            new GDConversionService().WriteOutputs(plan, Path.Combine("addons", "guideCS")));
+            new GDConversionService(TestSolutionContext.Instance).WriteOutputs(plan, Path.Combine("addons", "guideCS")));
         Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(otherProjectOutput)));
     }
 
@@ -410,10 +730,10 @@ public sealed class GDConversionPipelineTests
         using var analysis = await GDConversionAnalyzer.AnalyzeAsync(
             projectRoot,
             new GDConversionAnalysisOptions { MaxDegreeOfParallelism = 1, EnrichCallSites = false });
-        var plan = new GDConversionService().CreatePlan(analysis, CreateCompleteRules(relativePath));
+        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, CreateCompleteRules(relativePath));
 
         Assert.ThrowsException<InvalidOperationException>(() =>
-            new GDConversionService().WriteOutputs(plan, Path.Combine("addons", "guideCS")));
+            new GDConversionService(TestSolutionContext.Instance).WriteOutputs(plan, Path.Combine("addons", "guideCS")));
         Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(outsideSolutionOutput)));
     }
 
@@ -447,10 +767,24 @@ public sealed class GDConversionPipelineTests
             new PassMappingRule()
         ]);
 
+    private sealed class NativeVector2Policy : IGDConversionTypeRepresentationPolicy
+    {
+        public GDNativeTypeRepresentation? GetNativeTypeName(
+            string godotTypeName,
+            GDSemanticType? semanticType,
+            GDNode useSite,
+            GDConversionNodeContext context)
+            => godotTypeName == "Vector2" &&
+               context.Node is GDVariableDeclaration { Identifier.Sequence: "_position" }
+                ? new GDNativeTypeRepresentation("System.Numerics.Vector2", GDConversionRealPrecision.Single)
+                : null;
+    }
+
     private sealed class IgnoreNodeRule : IGDConversionRule
     {
         public string Name => "fallback-ignore";
         public int Priority => 0;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => true;
 
@@ -471,6 +805,7 @@ public sealed class GDConversionPipelineTests
     {
         public string Name => "variable-specialist";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => context.Node is GDVariableDeclaration;
 
@@ -479,6 +814,20 @@ public sealed class GDConversionPipelineTests
             var peerType = context.Script.TypeName == "Alpha" ? "Beta" : "Alpha";
             return GDConversionNodeResult.Converted(SyntaxFactory.ParseMemberDeclaration($"public {peerType} peer;")!);
         }
+
+    }
+
+    private sealed class NumberMappingRule : IGDConversionRule
+    {
+        public string Name => "number-mapping";
+        public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
+
+        public bool CanConvert(GDConversionNodeContext context) => context.Node is GDNumberExpression;
+
+        public GDConversionNodeResult Convert(GDConversionNodeContext context)
+            => GDConversionNodeResult.Converted(
+                SyntaxFactory.ParseExpression(((GDNumberExpression)context.Node!).Number.Sequence));
     }
 
     private sealed class ClassMappingRule(
@@ -492,6 +841,7 @@ public sealed class GDConversionPipelineTests
     {
         public string Name => "class-mapping";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => context.Node is GDClassDeclaration;
 
@@ -511,13 +861,13 @@ public sealed class GDConversionPipelineTests
                 SyntaxFactory.ClassDeclaration(declarationName ?? typeName),
                 destination);
         }
-
     }
 
     private sealed class ImplicitClassMappingRule : IGDConversionRule
     {
         public string Name => "implicit-class-mapping";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => context.Node is GDClassDeclaration;
 
@@ -530,6 +880,7 @@ public sealed class GDConversionPipelineTests
     {
         public string Name => "inner-class-mapping";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => context.Node is GDInnerClassDeclaration;
 
@@ -544,6 +895,7 @@ public sealed class GDConversionPipelineTests
     {
         public string Name => "hoisted-inner-class";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => context.Node is GDInnerClassDeclaration;
 
@@ -562,6 +914,7 @@ public sealed class GDConversionPipelineTests
     {
         public string Name => "redirected-method";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => context.Node is GDMethodDeclaration;
 
@@ -581,6 +934,7 @@ public sealed class GDConversionPipelineTests
     {
         public string Name => "conflicting-class-mapping";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => context.Node is GDClassDeclaration;
 
@@ -597,6 +951,7 @@ public sealed class GDConversionPipelineTests
     {
         public string Name => "method-mapping";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => context.Node is GDMethodDeclaration;
 
@@ -615,6 +970,7 @@ public sealed class GDConversionPipelineTests
     {
         public string Name => "statements-mapping";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context) => context.Node is GDStatementsList;
 
@@ -626,6 +982,7 @@ public sealed class GDConversionPipelineTests
     {
         public string Name => "pass-mapping";
         public int Priority => 10;
+        public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
         public bool CanConvert(GDConversionNodeContext context)
             => context.Node is GDExpressionStatement { Expression: GDPassExpression };

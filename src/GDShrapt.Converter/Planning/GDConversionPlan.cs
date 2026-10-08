@@ -480,6 +480,6 @@ public sealed class GDConversionPlan
         BaseTypeDeclarationSyntax updated = path.Count == 1
             ? AddMembers(target, null, members)
             : AddMembersToInnerType(target, path.Skip(1).ToArray(), members);
-        return outerType.WithMembers(outerType.Members.Replace(target, (MemberDeclarationSyntax)updated));
+        return outerType.WithMembers(outerType.Members.Replace(target, updated));
     }
 }

@@ -7,6 +7,7 @@ public sealed class IgnoreNodeRule(string? reason = null) : IGDConversionRule
 {
     public string Name => "fallback-ignore";
     public int Priority => 0;
+    public List<IGDConversionRuleMetadata> Metadata { get; set; } = [];
 
     public bool CanConvert(GDConversionNodeContext context) => true;
 
@@ -24,4 +25,3 @@ public sealed class IgnoreNodeRule(string? reason = null) : IGDConversionRule
         return GDConversionNodeResult.Ignored(reason);
     }
 }
-
