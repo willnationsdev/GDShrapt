@@ -9,7 +9,10 @@ internal sealed class TestSolutionContext : ISolutionContext
     private TestSolutionContext(bool supportsDoublePrecision)
     {
         DefaultProject = new TestCsProjectContext(supportsDoublePrecision);
-        DefaultFormatter = new DefaultGDConversionFormatter(new GDConversionFormattingOptions());
+        DefaultFormatter = new DefaultGDConversionFormatter(new GDConversionFormattingOptions
+        {
+            FieldNameStyle = GDConversionNameStyle.PrivateCamelCase
+        });
     }
 
     public static TestSolutionContext WithDoublePrecision(bool supportsDoublePrecision)

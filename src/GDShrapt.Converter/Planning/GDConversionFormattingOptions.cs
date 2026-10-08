@@ -10,7 +10,7 @@ public sealed class GDConversionFormattingOptions
     public string LineEnding { get; init; } = Environment.NewLine;
     public string? GitAttributesRoot { get; init; }
     public bool PreferFileScopedNamespaces { get; init; }
-    public GDConversionNameStyle FieldNameStyle { get; init; } = GDConversionNameStyle.PrivateCamelCase;
+    public GDConversionNameStyle FieldNameStyle { get; init; } = GDConversionNameStyle.PascalCase;
     public IReadOnlyList<GDConversionNamingRule> NamingRules { get; init; } = [];
 
     public string GetLineEnding(string outputPath)

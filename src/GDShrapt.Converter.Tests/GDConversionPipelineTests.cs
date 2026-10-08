@@ -13,6 +13,7 @@ namespace GDShrapt.Converter.Tests;
 public sealed class GDConversionPipelineTests
 {
     private string _projectDirectory = null!;
+    private GDSolutionContext _solutionContext = null!;
 
     [TestInitialize]
     public void Initialize()
@@ -21,6 +22,31 @@ public sealed class GDConversionPipelineTests
         Directory.CreateDirectory(_projectDirectory);
         File.WriteAllText(Path.Combine(_projectDirectory, "alpha.gd"), "class_name Alpha\nextends RefCounted\nvar peer: Beta\nfunc ping():\n\tpass\n");
         File.WriteAllText(Path.Combine(_projectDirectory, "beta.gd"), "class_name Beta\nextends RefCounted\nvar peer: Alpha\nfunc ping():\n\tpass\n");
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "GDShrapt.Tests.csproj"),
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, ".editorconfig"),
+            """
+            root = true
+
+            [*.cs]
+            dotnet_naming_rule.private_fields_rule.symbols = private_fields
+            dotnet_naming_rule.private_fields_rule.style = private_style
+            dotnet_naming_symbols.private_fields.applicable_kinds = field
+            dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+            dotnet_naming_style.private_style.capitalization = camel_case
+            dotnet_naming_style.private_style.required_prefix = _
+            """);
+        _solutionContext = new GDSolutionContext(
+            Path.Combine(_projectDirectory, "GDShrapt.Tests.csproj"),
+            "Testing");
     }
 
     [TestCleanup]
@@ -95,7 +121,7 @@ public sealed class GDConversionPipelineTests
             new PassMappingRule()
         ]);
 
-        var service = new GDConversionService(TestSolutionContext.Instance);
+        var service = new GDConversionService(_solutionContext);
         var plan = service.CreatePlan(analysis, rules);
 
         Assert.IsTrue(plan.IsComplete);
@@ -131,7 +157,7 @@ public sealed class GDConversionPipelineTests
             Path.Combine(_projectDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _health: int = 5\n");
         using var analysis = await CreateAnalysisAsync();
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+        var plan = new GDConversionService(_solutionContext).CreatePlan(
             analysis,
             new GDConversionRuleSet([new PrivateFieldRule(), new NumberMappingRule(), new IgnoreNodeRule()]));
 
@@ -150,7 +176,7 @@ public sealed class GDConversionPipelineTests
             Path.Combine(_projectDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _health: int = 5\nfunc update():\n\t_health = 7\n");
         using var analysis = await CreateAnalysisAsync();
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+        var plan = new GDConversionService(_solutionContext).CreatePlan(
             analysis,
             new GDConversionRuleSet([new PrivateFieldRule(), new NumberMappingRule(), new IgnoreNodeRule()]));
 
@@ -168,7 +194,7 @@ public sealed class GDConversionPipelineTests
             Path.Combine(_projectDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _health: int:\n\tget:\n\t\treturn 1\n");
         using var analysis = await CreateAnalysisAsync();
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+        var plan = new GDConversionService(_solutionContext).CreatePlan(
             analysis,
             new GDConversionRuleSet([new PrivateFieldRule(), new IgnoreNodeRule()]));
 
@@ -214,7 +240,7 @@ public sealed class GDConversionPipelineTests
             Path.Combine(_projectDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _position: Vector2 = Vector2(1, 2)\n");
         using var analysis = await CreateAnalysisAsync();
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+        var plan = new GDConversionService(_solutionContext).CreatePlan(
             analysis,
             new GDConversionRuleSet([new ClassMappingRule(), new PrivateFieldRule(), new IgnoreNodeRule()]));
 
@@ -237,7 +263,7 @@ public sealed class GDConversionPipelineTests
             Path.Combine(_projectDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _position: Vector2 = Vector2(1, 2)\n");
         using var analysis = await CreateAnalysisAsync();
-        var plan = new GDConversionService(TestSolutionContext.Instance, new NativeVector2Policy()).CreatePlan(
+        var plan = new GDConversionService(_solutionContext, new NativeVector2Policy()).CreatePlan(
             analysis,
             new GDConversionRuleSet([new PrivateFieldRule(), new IgnoreNodeRule()]));
         var field = plan.Entries
@@ -257,7 +283,7 @@ public sealed class GDConversionPipelineTests
             Path.Combine(_projectDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _position: Vector2 = Vector2(1, 2)\nvar _positions: Array[Vector2] = [Vector2(1, 2)]\n");
         using var analysis = await CreateAnalysisAsync();
-        var service = new GDConversionService(TestSolutionContext.Instance);
+        var service = new GDConversionService(_solutionContext);
         var plan = service.CreatePlan(
             analysis,
             new GDConversionRuleSet([new ClassMappingRule(), new PrivateFieldRule(), new IgnoreNodeRule()]));
@@ -285,7 +311,7 @@ public sealed class GDConversionPipelineTests
             Path.Combine(_projectDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _resource: RefCounted = RefCounted.new()\n");
         using var analysis = await CreateAnalysisAsync();
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+        var plan = new GDConversionService(_solutionContext).CreatePlan(
             analysis,
             new GDConversionRuleSet([new PrivateFieldRule(), new IgnoreNodeRule()]));
 
@@ -306,7 +332,7 @@ public sealed class GDConversionPipelineTests
             Path.Combine(_projectDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _health: int\nfunc _init(health: int):\n\t_health = health\n");
         using var analysis = await CreateAnalysisAsync();
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(
+        var plan = new GDConversionService(_solutionContext).CreatePlan(
             analysis,
             new GDConversionRuleSet([new ClassMappingRule(), new PrivateFieldRule(), new IgnoreNodeRule()]));
 
@@ -446,7 +472,7 @@ public sealed class GDConversionPipelineTests
     {
         using var analysis = await CreateAnalysisAsync();
 
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, GDConversionRuleSet.Empty);
+        var plan = new GDConversionService(_solutionContext).CreatePlan(analysis, GDConversionRuleSet.Empty);
 
         Assert.IsFalse(plan.IsComplete);
         Assert.IsTrue(plan.UnmappedNodes.Any());
@@ -464,7 +490,7 @@ public sealed class GDConversionPipelineTests
             new ImplicitClassMappingRule()
         ]);
 
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, rules);
+        var plan = new GDConversionService(_solutionContext).CreatePlan(analysis, rules);
 
         Assert.IsTrue(plan.IsComplete);
         CollectionAssert.AreEquivalent(
@@ -491,7 +517,7 @@ public sealed class GDConversionPipelineTests
             new PassMappingRule()
         ]);
 
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, rules);
+        var plan = new GDConversionService(_solutionContext).CreatePlan(analysis, rules);
 
         Assert.AreEqual(1, plan.Files.Count);
         Assert.IsTrue(plan.Files.All(file => file.OutputPath == Path.Combine("utilities", "Extensions.cs")));
@@ -515,7 +541,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService(TestSolutionContext.Instance);
+        var service = new GDConversionService(_solutionContext);
         var plan = service.CreatePlan(analysis, rules);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
@@ -543,7 +569,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService(TestSolutionContext.Instance);
+        var service = new GDConversionService(_solutionContext);
         var plan = service.CreatePlan(analysis, rules);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
@@ -568,7 +594,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService(TestSolutionContext.Instance);
+        var service = new GDConversionService(_solutionContext);
         var plan = service.CreatePlan(analysis, rules);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
@@ -589,11 +615,11 @@ public sealed class GDConversionPipelineTests
     public async Task WriteOutputs_RejectsIncompletePlanBeforeWriting()
     {
         using var analysis = await CreateAnalysisAsync();
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, GDConversionRuleSet.Empty);
+        var plan = new GDConversionService(_solutionContext).CreatePlan(analysis, GDConversionRuleSet.Empty);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
         Assert.ThrowsException<InvalidOperationException>(() =>
-            new GDConversionService(TestSolutionContext.Instance).WriteOutputs(plan, outputDirectory));
+            new GDConversionService(_solutionContext).WriteOutputs(plan, outputDirectory));
         Assert.IsFalse(Directory.Exists(outputDirectory));
     }
 
@@ -613,7 +639,7 @@ public sealed class GDConversionPipelineTests
             new MethodMappingRule("UtilitiesExtensions", includeClassName: true, order: -10)
         ]);
 
-        var service = new GDConversionService(TestSolutionContext.Instance);
+        var service = new GDConversionService(_solutionContext);
         var plan = service.CreatePlan(analysis, rules);
 
         Assert.IsTrue(plan.IsComplete);
@@ -650,7 +676,7 @@ public sealed class GDConversionPipelineTests
         ]);
 
         Assert.ThrowsException<InvalidOperationException>(() =>
-            new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, rules));
+            new GDConversionService(_solutionContext).CreatePlan(analysis, rules));
     }
 
     [TestMethod]
@@ -666,7 +692,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService(TestSolutionContext.Instance);
+        var service = new GDConversionService(_solutionContext);
         var plan = service.CreatePlan(analysis, rules);
         var outputDirectory = Path.Combine(_projectDirectory, "generated");
 
@@ -693,7 +719,7 @@ public sealed class GDConversionPipelineTests
             new StatementsMappingRule(),
             new PassMappingRule()
         ]);
-        var service = new GDConversionService(TestSolutionContext.Instance);
+        var service = new GDConversionService(_solutionContext);
         var plan = service.CreatePlan(analysis, rules);
 
         service.WriteOutputs(plan, Path.Combine("addons", "guideCS"));
@@ -713,10 +739,10 @@ public sealed class GDConversionPipelineTests
         using var analysis = await GDConversionAnalyzer.AnalyzeAsync(
             projectRoot,
             new GDConversionAnalysisOptions { MaxDegreeOfParallelism = 1, EnrichCallSites = false });
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, CreateCompleteRules(relativePath));
+        var plan = new GDConversionService(_solutionContext).CreatePlan(analysis, CreateCompleteRules(relativePath));
 
         Assert.ThrowsException<InvalidOperationException>(() =>
-            new GDConversionService(TestSolutionContext.Instance).WriteOutputs(plan, Path.Combine("addons", "guideCS")));
+            new GDConversionService(_solutionContext).WriteOutputs(plan, Path.Combine("addons", "guideCS")));
         Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(otherProjectOutput)));
     }
 
@@ -730,10 +756,10 @@ public sealed class GDConversionPipelineTests
         using var analysis = await GDConversionAnalyzer.AnalyzeAsync(
             projectRoot,
             new GDConversionAnalysisOptions { MaxDegreeOfParallelism = 1, EnrichCallSites = false });
-        var plan = new GDConversionService(TestSolutionContext.Instance).CreatePlan(analysis, CreateCompleteRules(relativePath));
+        var plan = new GDConversionService(_solutionContext).CreatePlan(analysis, CreateCompleteRules(relativePath));
 
         Assert.ThrowsException<InvalidOperationException>(() =>
-            new GDConversionService(TestSolutionContext.Instance).WriteOutputs(plan, Path.Combine("addons", "guideCS")));
+            new GDConversionService(_solutionContext).WriteOutputs(plan, Path.Combine("addons", "guideCS")));
         Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(outsideSolutionOutput)));
     }
 

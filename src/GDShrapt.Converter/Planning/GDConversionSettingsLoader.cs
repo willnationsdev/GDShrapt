@@ -62,7 +62,7 @@ internal static class GDConversionSettingsLoader
             LineEnding = ParseLineEnding(lineEndingValue),
             GitAttributesRoot = FindGitRoot(solutionRoot),
             PreferFileScopedNamespaces = namespaceStyle?.Contains("file_scoped", StringComparison.OrdinalIgnoreCase) == true,
-            FieldNameStyle = namingStyle ?? GDConversionNameStyle.PrivateCamelCase,
+            FieldNameStyle = namingStyle ?? GDConversionNameStyle.PascalCase,
             NamingRules = namingRules
         };
     }
@@ -156,7 +156,7 @@ internal static class GDConversionSettingsLoader
                 ParseNameList(accessibility, allowAll: true),
                 ParseNameList(GetSetting(settings, $"dotnet_naming_symbols.{symbolName}.required_modifiers")),
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-                new GDConversionNamingStyle(capitalization ?? "camel_case", prefix, suffix, separator),
+                new GDConversionNamingStyle(capitalization ?? "pascal_case", prefix, suffix, separator),
                 order++));
         }
 
