@@ -1,0 +1,47 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[Guide]
+
+"Editor/Joy Icons"=2
+"Editor/Joy Type"=1
+
+[application]
+
+config/name="TestGame"
+config/tags=PackedStringArray("game")
+config/use_custom_user_dir=true
+config/custom_user_dir_name="GDShrapt.Converter.Tests/{guid}/TestGame"
+config/features=PackedStringArray("4.7", "C#", "Mobile")
+config/icon="res://icon.svg"
+
+[autoload]
+
+GuideCs="*uid://dwc608aemhafg"
+GUIDE="*uid://p2jwrgjcbexr"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+
+[dotnet]
+
+project/assembly_name="EchoSoul"
+project/solution_directory="../../"
+
+[editor]
+
+naming/scene_name_casing=1
+naming/script_name_casing=1
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/guideCS/guide/plugin.cfg", "res://addons/guideCS/plugin.cfg")

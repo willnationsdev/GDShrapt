@@ -14,10 +14,18 @@
   <ItemGroup>
     <Compile Remove="_repo\**\*" />
     <EmbeddedResource Remove="_repo\**\*" />
-    <None Include="_repo\**\*" />
-    <None Remove="_repo\**\bin\**" />
-    <None Remove="_repo\**\obj\**" />
+    <None Include="_repo\**\*" Exclude="_repo\**\bin\**;_repo\**\obj\**;_repo\.vs\**" CopyToOutputDirectory="PreserveNewest" />
+    <ConverterTestRepoFile Include="_repo\**\*" Exclude="_repo\**\bin\**;_repo\**\obj\**;_repo\.vs\**" />
   </ItemGroup>
+
+  <Target Name="RefreshConverterTestRepo" BeforeTargets="VSTest">
+    <RemoveDir Directories="$(OutDir)_repo" />
+    <MakeDir Directories="$(OutDir)_repo" />
+    <Copy
+      SourceFiles="@(ConverterTestRepoFile)"
+      DestinationFiles="@(ConverterTestRepoFile->'$(OutDir)_repo\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="false" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="$(TestSdkVersion)" />

@@ -8,16 +8,21 @@ public sealed class GDSolutionContext : ISolutionContext
 {
     private readonly object _sync = new();
     private readonly string[] _projectFiles;
+    private readonly Dictionary<string, string> _assemblyNamesByAlias = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ICsProjectContext> _projectsByAssembly = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IGDConversionFormatter> _formattersByAssembly = new(StringComparer.OrdinalIgnoreCase);
 
     public const string DefaultExtensionsAssemblyName = "Godot.Extensions";
     public const string DefaultToolsAssemblyName = "Godot.Extensions.Tools";
 
-    public GDSolutionContext(string projectPath, string configuration = "Debug")
+    public GDSolutionContext(
+        string projectPath,
+        string configuration = "Debug",
+        IEnumerable<string>? assemblies = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(configuration);
+        RegisterAssemblies(assemblies);
 
         var fullPath = Path.GetFullPath(projectPath);
         var projectDirectory = File.Exists(fullPath) ? Path.GetDirectoryName(fullPath)! : fullPath;
@@ -58,10 +63,11 @@ public sealed class GDSolutionContext : ISolutionContext
         ArgumentException.ThrowIfNullOrWhiteSpace(assemblyName);
         lock (_sync)
         {
-            if (_formattersByAssembly.TryGetValue(assemblyName, out var formatter))
+            var resolvedAssemblyName = ResolveAssemblyName(assemblyName);
+            if (_formattersByAssembly.TryGetValue(resolvedAssemblyName, out var formatter))
                 return formatter;
 
-            var project = ResolveProject(assemblyName);
+            var project = ResolveProject(resolvedAssemblyName);
             formatter = CreateFormatter(Path.GetDirectoryName(project.ProjectFilePath!)!, project);
             _formattersByAssembly.Add(project.AssemblyName, formatter);
             return formatter;
@@ -77,7 +83,8 @@ public sealed class GDSolutionContext : ISolutionContext
 
     private ICsProjectContext ResolveProject(string assemblyName)
     {
-        if (_projectsByAssembly.TryGetValue(assemblyName, out var knownProject))
+        var resolvedAssemblyName = ResolveAssemblyName(assemblyName);
+        if (_projectsByAssembly.TryGetValue(resolvedAssemblyName, out var knownProject))
             return knownProject;
 
         foreach (var projectFile in _projectFiles)
@@ -89,12 +96,77 @@ public sealed class GDSolutionContext : ISolutionContext
             }
 
             var project = LoadProject(projectFile);
-            if (string.Equals(project.AssemblyName, assemblyName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(project.AssemblyName, resolvedAssemblyName, StringComparison.OrdinalIgnoreCase))
                 return project;
         }
 
-        throw new KeyNotFoundException($"No C# project named '{assemblyName}' was found in '{SolutionRoot}'.");
+        var registration = string.Equals(assemblyName, resolvedAssemblyName, StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : $" (registered by '{assemblyName}')";
+        throw new KeyNotFoundException(
+            $"No C# project named '{resolvedAssemblyName}'{registration} was found in '{SolutionRoot}'.");
     }
+
+    private void RegisterAssemblies(IEnumerable<string>? assemblies)
+    {
+        if (assemblies == null)
+            return;
+
+        foreach (var registration in assemblies)
+        {
+            if (string.IsNullOrWhiteSpace(registration))
+                throw new ArgumentException("Assembly registrations cannot be empty.", nameof(assemblies));
+
+            var value = registration.Trim();
+            var separatorIndex = value.IndexOf(':');
+            string alias;
+            string assemblyName;
+            if (separatorIndex < 0)
+            {
+                alias = value;
+                assemblyName = value;
+            }
+            else
+            {
+                if (separatorIndex == 0 ||
+                    separatorIndex == value.Length - 1 ||
+                    separatorIndex != value.LastIndexOf(':'))
+                {
+                    throw new ArgumentException(
+                        $"Invalid assembly registration '{registration}'. Expected 'alias:assembly-name' or 'assembly-name'.",
+                        nameof(assemblies));
+                }
+
+                alias = value[..separatorIndex].Trim();
+                assemblyName = value[(separatorIndex + 1)..].Trim();
+                if (alias.Length == 0 || assemblyName.Length == 0)
+                {
+                    throw new ArgumentException(
+                        $"Invalid assembly registration '{registration}'. Expected 'alias:assembly-name' or 'assembly-name'.",
+                        nameof(assemblies));
+                }
+            }
+
+            if (_assemblyNamesByAlias.TryGetValue(alias, out var existingAssemblyName))
+            {
+                if (!string.Equals(existingAssemblyName, assemblyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ArgumentException(
+                        $"Assembly alias '{alias}' is registered for both '{existingAssemblyName}' and '{assemblyName}'.",
+                        nameof(assemblies));
+                }
+
+                continue;
+            }
+
+            _assemblyNamesByAlias.Add(alias, assemblyName);
+        }
+    }
+
+    private string ResolveAssemblyName(string assemblyName)
+        => _assemblyNamesByAlias.TryGetValue(assemblyName, out var resolvedAssemblyName)
+            ? resolvedAssemblyName
+            : assemblyName;
 
     private ICsProjectContext LoadProject(string projectFile)
     {

@@ -15,6 +15,7 @@ public sealed class GDConversionPipelineTests
 {
     private string _testRootDirectory = null!;
     private string _projectDirectory = null!;
+    private string _scriptsDirectory = null!;
     private string _testGuid = null!;
     private GDSolutionContext _solutionContext = null!;
 
@@ -28,21 +29,45 @@ public sealed class GDConversionPipelineTests
         Directory.CreateDirectory(_testRootDirectory);
 
         CopyDirectory(repoPath, _testRootDirectory);
-        ReplaceInFile(Path.Combine(_testRootDirectory, ".editorconfig"), "{test-guid}", _testGuid);
 
-        _projectDirectory = Path.Combine(_testRootDirectory, "game", "client");
-        // Create supplemental projects.
+        _projectDirectory = Path.Combine(_testRootDirectory, "conversion-tests");
+        Directory.CreateDirectory(_projectDirectory);
+        _scriptsDirectory = Path.Combine(_projectDirectory, "scripts");
+        Directory.CreateDirectory(_scriptsDirectory);
+        File.WriteAllText(Path.Combine(_projectDirectory, "project.godot"), "config_version=5\n");
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, "TestGame.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>ConverterFixture</AssemblyName></PropertyGroup></Project>");
+        File.WriteAllText(
+            Path.Combine(_projectDirectory, ".editorconfig"),
+            """
+            root = true
+
+            [*.cs]
+            dotnet_naming_rule.private_fields_rule.symbols = private_fields
+            dotnet_naming_rule.private_fields_rule.style = private_style
+            dotnet_naming_symbols.private_fields.applicable_kinds = field
+            dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+            dotnet_naming_style.private_style.capitalization = camel_case
+            dotnet_naming_style.private_style.required_prefix = _
+            """);
+        File.WriteAllText(
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
+            "class_name Alpha\nextends RefCounted\nvar peer: Beta\nfunc ping():\n\tpass\n");
+        File.WriteAllText(
+            Path.Combine(_scriptsDirectory, "beta.gd"),
+            "class_name Beta\nextends RefCounted\nvar peer: Alpha\nfunc ping():\n\tpass\n");
 
         _solutionContext = new GDSolutionContext(
-            Path.Combine(_projectDirectory, "GDShrapt.Tests.csproj"),
+            Path.Combine(_projectDirectory, "TestGame.csproj"),
             "DebugTest");
     }
 
     [TestCleanup]
     public void Cleanup()
     {
-        if (Directory.Exists(_projectDirectory))
-            Directory.Delete(_projectDirectory, recursive: true);
+        if (Directory.Exists(_testRootDirectory))
+            Directory.Delete(_testRootDirectory, recursive: true);
     }
 
     [TestMethod]
@@ -50,7 +75,12 @@ public sealed class GDConversionPipelineTests
     {
         using var analysis = await GDConversionAnalyzer.AnalyzeAsync(
             _projectDirectory,
-            new GDConversionAnalysisOptions { MaxDegreeOfParallelism = 1, EnrichCallSites = false });
+            new GDConversionAnalysisOptions
+            {
+                FocusPath = "scripts",
+                MaxDegreeOfParallelism = 1,
+                EnrichCallSites = false
+            });
 
         Assert.AreEqual(2, analysis.Scripts.Count);
         Assert.IsTrue(analysis.Scripts.All(script => script.Class != null));
@@ -143,7 +173,7 @@ public sealed class GDConversionPipelineTests
     public async Task PrivateFieldRule_MapsUnderscoreFieldToTypedPrivateField()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _health: int = 5\n");
         using var analysis = await CreateAnalysisAsync();
         var plan = new GDConversionService(_solutionContext).CreatePlan(
@@ -162,7 +192,7 @@ public sealed class GDConversionPipelineTests
     public async Task PrivateFieldRule_DoesNotMarkFieldReadonlyWhenItIsReassigned()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _health: int = 5\nfunc update():\n\t_health = 7\n");
         using var analysis = await CreateAnalysisAsync();
         var plan = new GDConversionService(_solutionContext).CreatePlan(
@@ -180,7 +210,7 @@ public sealed class GDConversionPipelineTests
     public async Task PrivateFieldRule_DoesNotMapAccessorBackedProperties()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _health: int:\n\tget:\n\t\treturn 1\n");
         using var analysis = await CreateAnalysisAsync();
         var plan = new GDConversionService(_solutionContext).CreatePlan(
@@ -198,7 +228,7 @@ public sealed class GDConversionPipelineTests
     public async Task PrivateFieldRule_UsesSelectedProjectsRealPrecision()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _speed: float = 1\n");
         using var analysis = await CreateAnalysisAsync();
         var rules = new GDConversionRuleSet([new PrivateFieldRule(), new IgnoreNodeRule()]);
@@ -226,7 +256,7 @@ public sealed class GDConversionPipelineTests
     public async Task PrivateFieldRule_TranslatesGodotConstructorInitializers()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _position: Vector2 = Vector2(1, 2)\n");
         using var analysis = await CreateAnalysisAsync();
         var plan = new GDConversionService(_solutionContext).CreatePlan(
@@ -249,7 +279,7 @@ public sealed class GDConversionPipelineTests
     public async Task PrivateFieldRule_UsesPolicySelectedNativeRepresentationAtUseSite()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _position: Vector2 = Vector2(1, 2)\n");
         using var analysis = await CreateAnalysisAsync();
         var plan = new GDConversionService(_solutionContext, new NativeVector2Policy()).CreatePlan(
@@ -269,7 +299,7 @@ public sealed class GDConversionPipelineTests
     public async Task WriteOutputs_AdoptsNamespaceUsingContributionAndShortensTypeNames()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _position: Vector2 = Vector2(1, 2)\nvar _positions: Array[Vector2] = [Vector2(1, 2)]\n");
         using var analysis = await CreateAnalysisAsync();
         var service = new GDConversionService(_solutionContext);
@@ -285,7 +315,7 @@ public sealed class GDConversionPipelineTests
 
         service.WriteOutputs(plan, outputDirectory);
 
-        var output = File.ReadAllText(Path.Combine(outputDirectory, "alpha.cs"));
+        var output = File.ReadAllText(Path.Combine(outputDirectory, "scripts", "alpha.cs"));
         StringAssert.Contains(output, "using Godot;");
         StringAssert.Contains(output, "using Godot.Collections;");
         StringAssert.Contains(output, "Vector2 _position = new Vector2(1.0f, 2.0f)");
@@ -297,7 +327,7 @@ public sealed class GDConversionPipelineTests
     public async Task PrivateFieldRule_TranslatesGodotNewFactoryCalls()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _resource: RefCounted = RefCounted.new()\n");
         using var analysis = await CreateAnalysisAsync();
         var plan = new GDConversionService(_solutionContext).CreatePlan(
@@ -318,7 +348,7 @@ public sealed class GDConversionPipelineTests
     public async Task PrivateFieldRule_ContributesInitParameterAssignmentsToGeneratedConstructor()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _health: int\nfunc _init(health: int):\n\t_health = health\n");
         using var analysis = await CreateAnalysisAsync();
         var plan = new GDConversionService(_solutionContext).CreatePlan(
@@ -408,7 +438,7 @@ public sealed class GDConversionPipelineTests
             "\n",
             solution.DefaultFormatter.Options.GetLineEnding(Path.Combine(_projectDirectory, "Generated.gd")));
 
-        File.Delete(Path.Combine(_projectDirectory, "beta.gd"));
+        File.Delete(Path.Combine(_scriptsDirectory, "beta.gd"));
         using var analysis = await CreateAnalysisAsync();
         var conversion = new GDConversionService(solution);
         var plan = conversion.CreatePlan(
@@ -442,7 +472,7 @@ public sealed class GDConversionPipelineTests
             Path.Combine(_projectDirectory, "GlobalUsings.cs"),
             "global using Godot;\nglobal using Name = Godot.StringName;\n");
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nvar _name: StringName = &\"hero\"\n");
         using var analysis = await CreateAnalysisAsync();
         var plan = new GDConversionService(new GDSolutionContext(projectFilePath)).CreatePlan(
@@ -454,6 +484,48 @@ public sealed class GDConversionPipelineTests
             .Result.CSharpSyntax!;
 
         Assert.AreEqual("private readonly Name _name = new Name(\"hero\");", field.NormalizeWhitespace().ToFullString());
+    }
+
+    [TestMethod]
+    public async Task GDSolutionContext_ResolvesAssemblyAliasesForDestinations()
+    {
+        using var analysis = await CreateAnalysisAsync();
+        var solution = new GDSolutionContext(
+            Path.Combine(_testRootDirectory, "game", "client", "TestGame.csproj"),
+            "DebugTest",
+            [
+                $"ext:{GDSolutionContext.DefaultExtensionsAssemblyName}",
+                $"tools:{GDSolutionContext.DefaultToolsAssemblyName}",
+                GDSolutionContext.DefaultExtensionsAssemblyName
+            ]);
+
+        Assert.AreEqual(GDSolutionContext.DefaultExtensionsAssemblyName, solution.Project("ext").AssemblyName);
+        Assert.AreEqual(GDSolutionContext.DefaultToolsAssemblyName, solution.Project("tools").AssemblyName);
+        Assert.AreEqual(
+            GDSolutionContext.DefaultExtensionsAssemblyName,
+            solution.Project(GDSolutionContext.DefaultExtensionsAssemblyName).AssemblyName);
+
+        var conversion = new GDConversionService(solution);
+        var plan = conversion.CreatePlan(
+            analysis,
+            new GDConversionRuleSet(
+            [
+                new IgnoreNodeRule(),
+                new ClassMappingRule(
+                    pathFormat: Path.Combine("utilities", "Extensions.cs"),
+                    declarationName: "Extensions",
+                    destinationName: "Project.Utilities.Extensions",
+                    assemblyName: "ext"),
+                new VariableMappingRule(),
+                new MethodMappingRule(),
+                new StatementsMappingRule(),
+                new PassMappingRule()
+            ]));
+
+        Assert.AreEqual("ext", plan.Files.Single().AssemblyName);
+        var outputDirectory = Path.Combine(_projectDirectory, "generated");
+        conversion.WriteOutputs(plan, outputDirectory);
+        Assert.IsTrue(File.Exists(Path.Combine(outputDirectory, "utilities", "Extensions.cs")));
     }
 
     [TestMethod]
@@ -483,7 +555,7 @@ public sealed class GDConversionPipelineTests
 
         Assert.IsTrue(plan.IsComplete);
         CollectionAssert.AreEquivalent(
-            new[] { "alpha.cs", "beta.cs" },
+            new[] { Path.Combine("scripts", "alpha.cs"), Path.Combine("scripts", "beta.cs") },
             plan.Files.Select(file => file.OutputPath).ToArray());
         Assert.IsTrue(plan.Files.All(file => file.AssemblyName == null));
     }
@@ -518,7 +590,7 @@ public sealed class GDConversionPipelineTests
     public async Task WriteOutputs_RoutesExplicitContributionToHoistedInnerClassDestination()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nclass Inner:\n\tpass\n");
         using var analysis = await CreateAnalysisAsync();
         var rules = new GDConversionRuleSet(
@@ -536,7 +608,7 @@ public sealed class GDConversionPipelineTests
 
         service.WriteOutputs(plan, outputDirectory);
 
-        var alphaContent = File.ReadAllText(Path.Combine(outputDirectory, "alpha.cs"));
+        var alphaContent = File.ReadAllText(Path.Combine(outputDirectory, "scripts", "alpha.cs"));
         StringAssert.Contains(alphaContent, "class Inner");
         StringAssert.Contains(alphaContent, "PingBeta");
     }
@@ -545,7 +617,7 @@ public sealed class GDConversionPipelineTests
     public async Task WriteOutputs_EmitsPromotedInnerClassAsSeparateTopLevelFile()
     {
         File.WriteAllText(
-            Path.Combine(_projectDirectory, "alpha.gd"),
+            Path.Combine(_scriptsDirectory, "alpha.gd"),
             "class_name Alpha\nextends RefCounted\nclass Inner:\n\tpass\n");
         using var analysis = await CreateAnalysisAsync();
         var rules = new GDConversionRuleSet(
@@ -564,7 +636,7 @@ public sealed class GDConversionPipelineTests
 
         service.WriteOutputs(plan, outputDirectory);
 
-        var alphaContent = File.ReadAllText(Path.Combine(outputDirectory, "alpha.cs"));
+        var alphaContent = File.ReadAllText(Path.Combine(outputDirectory, "scripts", "alpha.cs"));
         var innerContent = File.ReadAllText(Path.Combine(outputDirectory, "inner", "Inner.cs"));
         Assert.IsFalse(alphaContent.Contains("class Inner", StringComparison.Ordinal));
         StringAssert.Contains(innerContent, "public class Inner");
@@ -698,7 +770,11 @@ public sealed class GDConversionPipelineTests
         var relativeLibraryPath = Path.GetRelativePath(outputDirectory, classLibraryOutput);
         using var analysis = await GDConversionAnalyzer.AnalyzeAsync(
             projectRoot,
-            new GDConversionAnalysisOptions { MaxDegreeOfParallelism = 1, EnrichCallSites = false });
+            new GDConversionAnalysisOptions
+            {
+                MaxDegreeOfParallelism = 1,
+                EnrichCallSites = false
+            });
         var rules = new GDConversionRuleSet(
         [
             new IgnoreNodeRule(),
@@ -756,7 +832,12 @@ public sealed class GDConversionPipelineTests
     {
         return GDConversionAnalyzer.AnalyzeAsync(
             _projectDirectory,
-            new GDConversionAnalysisOptions { MaxDegreeOfParallelism = 1, EnrichCallSites = false });
+            new GDConversionAnalysisOptions
+            {
+                FocusPath = "scripts",
+                MaxDegreeOfParallelism = 1,
+                EnrichCallSites = false
+            });
     }
 
     private string CreateSolutionProject(out string solutionRoot)
@@ -1057,13 +1138,4 @@ public sealed class GDConversionPipelineTests
         }
     }
 
-    private static void ReplaceInFile(
-        string path,
-        string search,
-        string replacement)
-    {
-        var contents = File.ReadAllText(path);
-        contents = contents.Replace(search, replacement);
-        File.WriteAllText(path, contents);
-    }
 }

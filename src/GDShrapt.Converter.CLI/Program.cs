@@ -92,7 +92,7 @@ public class BasicCommands
     /// <param name="outputPath">The output directory for generated C# files, relative to the Godot project directory when not rooted.</param>
     /// <param name="dryRun">Report planned files without writing them.</param>
     /// <param name="configuration">The .NET build configuration whose project properties should be used.</param>
-    /// <param name="assemblies">Paths to C# projects to which conversions can be hoisted.</param>
+    /// <param name="assemblies">Assembly names or alias registrations in the form alias:assembly-name.</param>
     public async Task Convert(
         [Argument] string path,
         [Argument] string outputPath,
@@ -103,7 +103,7 @@ public class BasicCommands
         var projectRoot = GDProjectLoader.FindProjectRoot(path) ?? Path.GetFullPath(path);
         using var analysis = await GDConversionAnalyzer.AnalyzeAsync(path, CreateDefaultAnalysisOptions(projectRoot, path));
         var resolvedOutputPath = Path.GetFullPath(outputPath, analysis.Project.ProjectPath);
-        var solutionContext = new GDSolutionContext(projectRoot, configuration);
+        var solutionContext = new GDSolutionContext(projectRoot, configuration, assemblies);
         var conversionService = new GDConversionService(solutionContext);
         // TODO: create formatter object that reads .editorconfig and/or ReSharper settings (if present) to derive the expected conventions for naming, spacing, namespaces, etc. + the root namespace, implicit/global usings, root namespace.
         var formatter = new DefaultGDConversionFormatter(new GDConversionFormattingOptions());

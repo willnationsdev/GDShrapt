@@ -148,7 +148,7 @@ Solution: `src/GDShrapt.sln`. Tests use MSTest with FluentAssertions.
 - `IGDConversionRule` and `GDConversionRuleSet` apply prioritized strategies to every AST node and terminal token; each result is C# syntax or an explicit ignore, while unmatched syntax remains visible in `GDConversionPlan`
 - `GDConversionService.CreatePlan` applies prioritized conversion rules to every AST node and terminal token; `GDConversionDestination` routes and orders mapped declarations, and a complete plan contains resolved C# declaration files for `WriteOutputs`
 - `GDConversionNodeContext` exposes the node, parent, semantic model, and flow-state queries so rules can make narrowly-scoped decisions without rescanning a whole class
-- `GDShrapt.Converter.CLI analyze` writes a JSON project artifact; `convert` consumes the rule pipeline
+- `GDShrapt.Converter.CLI analyze` writes a JSON project artifact; `convert` consumes the rule pipeline and accepts repeatable `--assemblies` values as assembly names or `alias:assembly-name` registrations for destination routing
 
 **LSP** - Language Server Protocol 3.17
 - `GDLanguageServer` - Main server: `InitializeAsync()`, `RunAsync()`

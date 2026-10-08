@@ -16,7 +16,6 @@ internal static class GDConversionSettingsLoader
             foreach (var (key, value) in ReadEditorConfig(editorConfig, projectDirectory))
                 settings[key] = value;
         }
-
         var indentStyle = GetSetting(settings, "indent_style");
         var indentSizeValue = GetSetting(settings, "indent_size");
         var lineEndingValue = GetSetting(settings, "end_of_line");
@@ -69,22 +68,23 @@ internal static class GDConversionSettingsLoader
 
     private static IEnumerable<string> FindEditorConfigFiles(string projectDirectory)
     {
-        var directories = new Stack<string>();
+        var editorConfigs = new List<string>();
         for (var directory = new DirectoryInfo(projectDirectory); directory != null; directory = directory.Parent)
-            directories.Push(directory.FullName);
-
-        var applyAncestors = true;
-        while (directories.Count > 0 && applyAncestors)
         {
-            var directory = directories.Pop();
-            var path = Path.Combine(directory, ".editorconfig");
+            var path = Path.Combine(directory.FullName, ".editorconfig");
             if (!File.Exists(path))
                 continue;
 
-            yield return path;
-            applyAncestors = !File.ReadLines(path)
-                .Any(line => line.Trim().Equals("root = true", StringComparison.OrdinalIgnoreCase));
+            editorConfigs.Add(path);
+            if (File.ReadLines(path)
+                .Any(line => line.Trim().Equals("root = true", StringComparison.OrdinalIgnoreCase)))
+            {
+                break;
+            }
         }
+
+        editorConfigs.Reverse();
+        return editorConfigs;
     }
 
     private static IEnumerable<KeyValuePair<string, string>> ReadEditorConfig(string path, string projectDirectory)
